@@ -103,3 +103,70 @@ export function ArrowUpIcon(props: IconProps) {
     </StrokeIcon>
   )
 }
+
+/** Capital-gains statement glyph (torn-edge receipt). */
+export function ReceiptIcon(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <path d="M5 2v20l2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1z" />
+      <path d="M9 7h6" />
+      <path d="M9 11h6" />
+      <path d="M9 15h4" />
+    </StrokeIcon>
+  )
+}
+
+export function CalendarIcon(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <rect x="3" y="4" width="18" height="18" rx="2" />
+      <path d="M16 2v4" />
+      <path d="M8 2v4" />
+      <path d="M3 10h18" />
+    </StrokeIcon>
+  )
+}
+
+export function MailIcon(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <path d="m22 7-10 6L2 7" />
+    </StrokeIcon>
+  )
+}
+
+export function DownloadIcon(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <path d="M7 10l5 5 5-5" />
+      <path d="M12 15V3" />
+    </StrokeIcon>
+  )
+}
+
+export function CheckIcon(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <path d="M20 6 9 17l-5-5" />
+    </StrokeIcon>
+  )
+}
+
+/** Left/right chevrons for the calendar month nav. */
+export function ChevronLeftIcon(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <path d="m15 18-6-6 6-6" />
+    </StrokeIcon>
+  )
+}
+
+export function ChevronRightIcon(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <path d="m9 18 6-6-6-6" />
+    </StrokeIcon>
+  )
+}
