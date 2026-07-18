@@ -75,16 +75,17 @@ export interface FormatSlot {
 }
 
 /** Choose one/many from a list fetched at runtime (Contract Notes). The
- *  descriptor declares only the source + arity; the engine fetches and
- *  renders. Wave 0 ships the shape; no live flow exercises it yet. */
+ *  descriptor declares only the source + arity; the engine fetches, renders
+ *  the month-grouped list, and downloads each tapped item. */
 export interface SelectionSlot {
   key: string
   label: string
   type: 'selection'
   /** false → single pick, true → multi-select. */
   multiple: boolean
-  /** Backend endpoint the engine fetches the pickable list from. */
-  source: { endpoint: string }
+  /** Backend endpoints the engine drives: `endpoint` fetches the pickable list
+   *  from the collected date range; `download` fetches one tapped item's file. */
+  source: { endpoint: string; download: string }
 }
 
 export type Slot = ChipsSlot | DateSlot | FormatSlot | SelectionSlot

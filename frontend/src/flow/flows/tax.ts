@@ -1,14 +1,39 @@
 /**
- * Capital-gains (Tax) flow — Wave-1 placeholder. Its purpose in Wave 0 is to
- * prove the schema accommodates the `format` slot (PDF/Excel) before freezing.
- * Modelled, wired to the sticker, shows the "coming soon" stub until Wave 1.
+ * Capital-gains (Tax) flow — Wave-1, wired live to the backend. The ONE flow
+ * with a `format` step: PDF or Excel. Capital-gain intent routes here (there is
+ * no separate CG API).
+ *
+ * Shape: chips (financial year) → format (PDF/Excel) → delivery. The FinYear
+ * window is DYNAMIC — the current Indian FY plus the previous two, computed here
+ * so it rolls forward on its own each April and is never a hardcoded list.
  */
 
 import { DownloadIcon, MailIcon, ReceiptIcon } from '../../icons'
-import type { ChipsValue, FilledValues, FlowDescriptor, FormatValue } from '../types'
+import type {
+  ChipOption,
+  ChipsValue,
+  FilledValues,
+  FlowDescriptor,
+  FormatValue,
+} from '../types'
 
-const fy = (v: FilledValues) => (v['fy'] as ChipsValue | undefined)?.label ?? ''
+const fy = (v: FilledValues) => (v['finYear'] as ChipsValue | undefined)?.label ?? ''
 const format = (v: FilledValues) => (v['format'] as FormatValue | undefined)?.label ?? ''
+
+/**
+ * The selectable financial years: current FY + the previous two, newest first.
+ * The Indian FY runs April–March, so before April we are still in the FY that
+ * began the previous calendar year (getMonth() is 0-based; March = 2, April = 3).
+ */
+function financialYearOptions(today: Date = new Date()): ChipOption[] {
+  const startYear =
+    today.getMonth() >= 3 ? today.getFullYear() : today.getFullYear() - 1
+  return [0, 1, 2].map((back) => {
+    const s = startYear - back
+    const label = `${s}-${s + 1}`
+    return { label, value: label }
+  })
+}
 
 const tax: FlowDescriptor = {
   key: 'tax',
@@ -17,18 +42,14 @@ const tax: FlowDescriptor = {
   keywords: /capital|tax|gains?/i,
   sticker: { icon: ReceiptIcon, tint: 'amber' },
   intro: "Sure — let's get your capital gains statement.",
-  comingSoon: true,
 
   slots: [
     {
-      key: 'fy',
+      key: 'finYear',
       label: 'Financial year',
       type: 'chips',
-      options: [
-        { label: '2025-2026', value: '2025-2026' },
-        { label: '2024-2025', value: '2024-2025' },
-        { label: '2023-2024', value: '2023-2024' },
-      ],
+      // Dynamic window (current FY + last 2) — never a hardcoded list.
+      options: financialYearOptions(),
     },
     {
       key: 'format',
@@ -53,6 +74,15 @@ const tax: FlowDescriptor = {
     emailNoun: (v) => `your capital gains statement for **FY ${fy(v)}**`,
     passwordNote: 'password: PAN',
     helpKind: 'pdf',
+  },
+
+  backend: {
+    endpoint: '/api/report/tax',
+    buildBody: (v, mode) => ({
+      finYear: (v['finYear'] as ChipsValue).value,
+      format: (v['format'] as FormatValue).value, // 'PDF' | 'Excel'
+      delivery: mode, // 'download' | 'email'
+    }),
   },
 }
 

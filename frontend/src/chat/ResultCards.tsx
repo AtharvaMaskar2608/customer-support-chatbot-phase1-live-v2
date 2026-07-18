@@ -58,14 +58,17 @@ function IconButton({
 export function FileCard({
   file,
   passwordNote,
+  emailable = true,
   onDownload,
   onEmailIt,
   onHelp,
 }: Readonly<{
   file: FileInfo
   passwordNote: string | null
+  /** Contract notes have no email delivery → the "Email it" button is hidden. */
+  emailable?: boolean
   onDownload: () => void
-  onEmailIt: () => void
+  onEmailIt?: () => void
   onHelp: () => void
 }>) {
   const [status, setStatus] = useState<'idle' | 'busy' | 'done'>('idle')
@@ -105,9 +108,11 @@ export function FileCard({
             {status === 'done' && <CheckIcon className="size-4" />}
             {status === 'idle' && <DownloadIcon className="size-4" />}
           </IconButton>
-          <IconButton title="Email it" onClick={onEmailIt}>
-            <MailIcon className="size-4" />
-          </IconButton>
+          {emailable && onEmailIt && (
+            <IconButton title="Email it" onClick={onEmailIt}>
+              <MailIcon className="size-4" />
+            </IconButton>
+          )}
         </div>
       </div>
       <Followup label="Trouble opening it?" onHelp={onHelp} />

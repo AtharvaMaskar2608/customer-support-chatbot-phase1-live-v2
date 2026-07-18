@@ -7,6 +7,7 @@
 import type { FileInfo, ReportErrorCode } from '../flow/api'
 import type { FlowRun } from '../flow/engine'
 import type { FilledValues, HelpKind } from '../flow/types'
+import type { ClientNote } from './notes'
 
 let counter = 0
 export function nextId(): string {
@@ -36,8 +37,22 @@ export type Message =
       fileToken: string
       passwordNote: string | null
       helpKind: HelpKind
+      /** Whether the "Email it" affordance applies (false for contract notes,
+       *  which have no email delivery). Absent ⇒ emailable. */
+      emailable?: boolean
     }
   | { id: string; kind: 'email'; noun: string; emailMasked: string }
+  /** Contract-notes selection step: the month-grouped tap-to-get list. */
+  | {
+      id: string
+      kind: 'notesList'
+      /** The flow message this list belongs to (its date step, for editing). */
+      flowMsgId: string
+      downloadEndpoint: string
+      notes: ClientNote[]
+    }
+  /** A standalone "Change dates"/"Other dates" pill (single-note & empty/error). */
+  | { id: string; kind: 'notesAction'; flowMsgId: string; label: string }
   /** Actionable help card (options + raise-a-ticket). */
   | { id: string; kind: 'help'; helpKind: HelpKind }
   /** Ticket-confirmation card. */

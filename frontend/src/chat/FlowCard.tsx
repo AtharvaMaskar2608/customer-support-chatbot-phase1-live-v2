@@ -8,7 +8,6 @@ import type {
   DeliveryMode,
   FlowDescriptor,
   FormatSlot,
-  SelectionSlot,
   Slot,
   SlotValue,
 } from '../flow/types'
@@ -162,17 +161,6 @@ function DateWidget({
   )
 }
 
-/** Selection slot — Wave-0 placeholder. No live flow reaches this yet
- *  (Contract Notes is coming-soon); the branch exists so the schema's
- *  selection type is renderable when Wave 1 wires the list endpoint. */
-function SelectionWidget({ slot }: Readonly<{ slot: SelectionSlot }>) {
-  return (
-    <p className="text-[13px] text-zinc-400 dark:text-zinc-500">
-      Pick {slot.multiple ? 'one or more' : 'one'} from your list — available in a later build.
-    </p>
-  )
-}
-
 function SlotWidget({
   slot,
   value,
@@ -202,7 +190,9 @@ function SlotWidget({
     case 'date':
       return <DateWidget slot={slot} onPick={onPick} />
     case 'selection':
-      return <SelectionWidget slot={slot} />
+      // The selection step is driven by the chat shell (fetched list + result
+      // cards render as their own messages, not inside this card).
+      return null
   }
 }
 
@@ -257,15 +247,19 @@ export function FlowCard({
   for (let i = 0; i < descriptor.slots.length; i += 1) {
     const slot = descriptor.slots[i]
     if (run.active === slot.key) {
-      rows.push(
-        <SlotRow key={slot.key} n={i + 1} label={slot.label}>
-          <SlotWidget
-            slot={slot}
-            value={run.values[slot.key]}
-            onPick={(value) => onPick(slot.key, value)}
-          />
-        </SlotRow>,
-      )
+      // The selection step renders outside the card (the chat shell drives the
+      // fetched list + downloads); the card shows only the filled steps above.
+      if (slot.type !== 'selection') {
+        rows.push(
+          <SlotRow key={slot.key} n={i + 1} label={slot.label}>
+            <SlotWidget
+              slot={slot}
+              value={run.values[slot.key]}
+              onPick={(value) => onPick(slot.key, value)}
+            />
+          </SlotRow>,
+        )
+      }
       break
     }
     const value = run.values[slot.key]

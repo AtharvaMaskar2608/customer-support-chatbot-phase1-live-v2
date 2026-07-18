@@ -13,6 +13,9 @@ from app import config
 from app.finx.delivery import FileTokenStore
 from app.greeting import router as greeting_router
 from app.report import router as report_router
+from app.reports.contract_notes import router as contract_notes_router
+from app.reports.ledger import router as ledger_router
+from app.reports.tax import router as tax_router
 from app.whats_new import router as whats_new_router
 
 
@@ -55,6 +58,10 @@ def create_app() -> FastAPI:
     app.include_router(greeting_router)
     app.include_router(whats_new_router)
     app.include_router(report_router)
+    # Wave-1 report flows (each a self-contained per-flow router).
+    app.include_router(ledger_router)
+    app.include_router(tax_router)
+    app.include_router(contract_notes_router)
     return app
 
 

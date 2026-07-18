@@ -1,8 +1,10 @@
 /**
- * Ledger flow — Wave-1 placeholder. Descriptor is modelled now (chips + date
- * + delivery, same shape family as P&L) to keep the sticker wired and prove
- * the schema; tapping it shows the "coming soon" stub until Wave 1 adds the
- * backend binding. Fan-out = drop `comingSoon` + add a `backend` block.
+ * Ledger flow — Wave-1, wired live to the backend (CHO-208).
+ *
+ * Shape: chips (book) → date (range) → delivery. Same shape family as P&L,
+ * PDF-only. The `book` chip shows customer labels (Normal / MTF) and the label
+ * is what we send: the backend owns book→Margin (0/1) mapping so the raw
+ * discriminator never crosses our API.
  */
 
 import { DocumentIcon, LedgerIcon, MailIcon } from '../../icons'
@@ -19,7 +21,6 @@ const ledger: FlowDescriptor = {
   keywords: /ledger/i,
   sticker: { icon: LedgerIcon, tint: 'blue' },
   intro: "Sure — let's pull your ledger.",
-  comingSoon: true,
 
   slots: [
     {
@@ -53,6 +54,16 @@ const ledger: FlowDescriptor = {
     emailNoun: (v) => `your **${chip(v, 'book')}** ledger for **${range(v)}**`,
     passwordNote: 'password: PAN',
     helpKind: 'pdf',
+  },
+
+  backend: {
+    endpoint: '/api/report/ledger',
+    buildBody: (v, mode) => ({
+      book: (v['book'] as ChipsValue).value,
+      fromDate: (v['range'] as DateRangeValue).fromDate,
+      toDate: (v['range'] as DateRangeValue).toDate,
+      delivery: mode, // 'download' | 'email'
+    }),
   },
 }
 
