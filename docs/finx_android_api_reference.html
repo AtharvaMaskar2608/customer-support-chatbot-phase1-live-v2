@@ -1,0 +1,1070 @@
+<title>FinX Android Report APIs — Field Reference</title>
+<style>
+  /* ============================================================= TOKENS */
+  :root {
+    /* light (default) — cool paper terminal */
+    --ground:      #e7ebe8;
+    --surface:     #f5f8f6;
+    --surface-2:   #eef2f0;
+    --ink:         #17211f;
+    --ink-dim:     #46534e;
+    --ink-faint:   #78857f;
+    --line:        rgba(20,40,34,0.13);
+    --line-strong: rgba(20,40,34,0.24);
+    --accent:      #9a640f;   /* text-safe gold */
+    --accent-vivid:#c6871c;   /* decorative gold */
+    --accent-soft: rgba(198,135,28,0.13);
+    --download:    #147a56;
+    --download-soft: rgba(20,122,86,0.12);
+    --email:       #2565bd;
+    --email-soft:  rgba(37,101,189,0.12);
+    --critical:    #c23a2e;
+    --critical-soft: rgba(194,58,46,0.10);
+    --provisional: #6f7c86;
+    --dot-net:     #5b7fbf;
+    --dot-go:      #1f9a90;
+    --dot-mis:     #9163c9;
+    /* code panels stay dark in BOTH themes — a deliberate terminal motif */
+    --code-bg:     #0c1216;
+    --code-ink:    #cdd8d2;
+    --code-key:    #7fb7f0;
+    --code-str:    #6fd39a;
+    --code-num:    #e8b25a;
+    --code-lit:    #d98fd0;
+    --code-com:    #5f726c;
+    --code-line:   rgba(255,255,255,0.06);
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, "Times New Roman", serif;
+    --sans:  system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono:  ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, "Cascadia Code", "Liberation Mono", monospace;
+    --rail: 268px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground:      #0b1013;
+      --surface:     #121a1e;
+      --surface-2:   #0e1518;
+      --ink:         #e7ede9;
+      --ink-dim:     #a3b2ad;
+      --ink-faint:   #66766f;
+      --line:        rgba(255,255,255,0.09);
+      --line-strong: rgba(255,255,255,0.17);
+      --accent:      #e9a93c;
+      --accent-vivid:#e9a93c;
+      --accent-soft: rgba(233,169,60,0.13);
+      --download:    #46c08a;
+      --download-soft: rgba(70,192,138,0.13);
+      --email:       #5aa4ee;
+      --email-soft:  rgba(90,164,238,0.13);
+      --critical:    #f26a5f;
+      --critical-soft: rgba(242,106,95,0.12);
+      --provisional: #8b98a1;
+      --dot-net:     #7d9cd8;
+      --dot-go:      #3fbbb0;
+      --dot-mis:     #b78ce6;
+    }
+  }
+  /* explicit toggle overrides (viewer's theme switch stamps data-theme) */
+  :root[data-theme="light"] {
+    --ground:#e7ebe8; --surface:#f5f8f6; --surface-2:#eef2f0;
+    --ink:#17211f; --ink-dim:#46534e; --ink-faint:#78857f;
+    --line:rgba(20,40,34,0.13); --line-strong:rgba(20,40,34,0.24);
+    --accent:#9a640f; --accent-vivid:#c6871c; --accent-soft:rgba(198,135,28,0.13);
+    --download:#147a56; --download-soft:rgba(20,122,86,0.12);
+    --email:#2565bd; --email-soft:rgba(37,101,189,0.12);
+    --critical:#c23a2e; --critical-soft:rgba(194,58,46,0.10);
+    --provisional:#6f7c86; --dot-net:#5b7fbf; --dot-go:#1f9a90; --dot-mis:#9163c9;
+  }
+  :root[data-theme="dark"] {
+    --ground:#0b1013; --surface:#121a1e; --surface-2:#0e1518;
+    --ink:#e7ede9; --ink-dim:#a3b2ad; --ink-faint:#66766f;
+    --line:rgba(255,255,255,0.09); --line-strong:rgba(255,255,255,0.17);
+    --accent:#e9a93c; --accent-vivid:#e9a93c; --accent-soft:rgba(233,169,60,0.13);
+    --download:#46c08a; --download-soft:rgba(70,192,138,0.13);
+    --email:#5aa4ee; --email-soft:rgba(90,164,238,0.13);
+    --critical:#f26a5f; --critical-soft:rgba(242,106,95,0.12);
+    --provisional:#8b98a1; --dot-net:#7d9cd8; --dot-go:#3fbbb0; --dot-mis:#b78ce6;
+  }
+
+  /* ============================================================= BASE */
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: var(--sans); font-size: 16px; line-height: 1.62;
+    -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  }
+  ::selection { background: var(--accent-soft); }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  :focus-visible { outline: 2px solid var(--accent-vivid); outline-offset: 3px; border-radius: 3px; }
+
+  /* reading progress */
+  #progress {
+    position: fixed; top: 0; left: 0; height: 3px; width: 0%;
+    background: linear-gradient(90deg, var(--accent-vivid), color-mix(in srgb, var(--accent-vivid) 40%, transparent));
+    z-index: 60; transition: width .1s linear;
+  }
+
+  /* ============================================================= LAYOUT */
+  .page { max-width: 1320px; margin: 0 auto; display: grid; grid-template-columns: var(--rail) minmax(0,1fr); }
+  .rail { grid-column: 1; }
+  .main { grid-column: 2; min-width: 0; padding: 0 clamp(20px, 4vw, 64px) 8rem; }
+  @media (max-width: 940px) {
+    .page { grid-template-columns: 1fr; }
+    .main { grid-column: 1; padding: 0 20px 6rem; }
+  }
+
+  /* ============================================================= RAIL */
+  .rail__inner {
+    position: sticky; top: 0; height: 100vh; overflow-y: auto; padding: 26px 20px 40px;
+    border-right: 1px solid var(--line);
+    display: flex; flex-direction: column; gap: 22px;
+    scrollbar-width: thin;
+  }
+  .rail__brand { font-family: var(--mono); font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--ink-faint); }
+  .rail__brand b { display:block; font-family: var(--serif); font-size: 20px; letter-spacing: 0; text-transform: none; color: var(--ink); margin-top: 4px; font-weight: 600; }
+  .rail nav { display: flex; flex-direction: column; gap: 1px; }
+  .rail .navlabel { font-family: var(--mono); font-size: 10px; letter-spacing: .18em; text-transform: uppercase; color: var(--ink-faint); margin: 14px 0 6px; padding-left: 12px; }
+  .rail a.nav {
+    display: flex; align-items: center; gap: 9px; padding: 7px 12px; border-radius: 7px;
+    color: var(--ink-dim); font-size: 13.5px; line-height: 1.3; border-left: 2px solid transparent;
+  }
+  .rail a.nav:hover { background: var(--surface); text-decoration: none; color: var(--ink); }
+  .rail a.nav.is-active { background: var(--accent-soft); color: var(--ink); border-left-color: var(--accent-vivid); }
+  .rail a.nav .num { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); min-width: 1.4em; }
+  .rail a.nav.is-active .num { color: var(--accent); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .dot--net { background: var(--dot-net); } .dot--go { background: var(--dot-go); } .dot--mis { background: var(--dot-mis); }
+  @media (max-width: 940px) {
+    .rail__inner { position: sticky; top: 0; height: auto; flex-direction: row; align-items: center; gap: 14px;
+      overflow-x: auto; overflow-y: hidden; border-right: none; border-bottom: 1px solid var(--line);
+      background: color-mix(in srgb, var(--ground) 88%, transparent); backdrop-filter: blur(10px); z-index: 40; padding: 12px 16px; }
+    .rail__brand { flex: none; }
+    .rail__brand b { display: none; }
+    .rail .navlabel { display: none; }
+    .rail nav { flex-direction: row; gap: 4px; }
+    .rail a.nav { white-space: nowrap; border-left: none; border-bottom: 2px solid transparent; padding: 6px 10px; }
+    .rail a.nav.is-active { border-left: none; border-bottom-color: var(--accent-vivid); }
+    .rail a.nav .txt { display: none; }
+  }
+
+  /* ============================================================= HERO */
+  .hero { position: relative; padding: clamp(48px, 8vw, 104px) 0 46px; overflow: hidden; }
+  .hero::before {
+    content: ""; position: absolute; inset: -2px -40px auto -40px; height: 420px; z-index: 0; opacity: .5;
+    background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px);
+    background-size: 46px 46px;
+    -webkit-mask-image: radial-gradient(120% 90% at 20% 0%, #000 20%, transparent 72%);
+            mask-image: radial-gradient(120% 90% at 20% 0%, #000 20%, transparent 72%);
+  }
+  .hero > * { position: relative; z-index: 1; }
+  .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .22em; text-transform: uppercase; color: var(--accent); display: flex; align-items: center; gap: 12px; }
+  .eyebrow::after { content: ""; height: 1px; flex: 1; background: linear-gradient(90deg, var(--accent-soft), transparent); max-width: 180px; }
+  h1 {
+    font-family: var(--serif); font-weight: 600; letter-spacing: -0.015em; text-wrap: balance;
+    font-size: clamp(2.5rem, 6.4vw, 4.6rem); line-height: 1.03; margin: 20px 0 0;
+  }
+  h1 .thin { color: var(--ink-dim); font-style: italic; }
+  h1 .mark { color: var(--accent); position: relative; white-space: nowrap; }
+  .lede { font-size: clamp(1.05rem, 1.8vw, 1.28rem); color: var(--ink-dim); max-width: 62ch; margin: 22px 0 0; line-height: 1.55; }
+  .lede b { color: var(--ink); font-weight: 600; }
+
+  .statstrip { display: flex; flex-wrap: wrap; gap: 0; margin-top: 40px; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--surface); }
+  .stat { flex: 1 1 150px; padding: 20px 24px; border-right: 1px solid var(--line); }
+  .stat:last-child { border-right: none; }
+  .stat .big { font-family: var(--serif); font-size: 2.5rem; line-height: 1; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .stat .cap { font-family: var(--mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-faint); margin-top: 8px; }
+  .stat .sub { font-size: 13px; color: var(--ink-dim); margin-top: 3px; }
+
+  /* ticker */
+  .ticker { margin-top: 34px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); overflow: hidden; position: relative; }
+  .ticker::before, .ticker::after { content:""; position:absolute; top:0; bottom:0; width:60px; z-index:2; pointer-events:none; }
+  .ticker::before { left:0; background: linear-gradient(90deg, var(--ground), transparent); }
+  .ticker::after { right:0; background: linear-gradient(270deg, var(--ground), transparent); }
+  .ticker__track { display: inline-flex; gap: 34px; white-space: nowrap; padding: 11px 0; will-change: transform; animation: scroll 46s linear infinite; font-family: var(--mono); font-size: 12.5px; color: var(--ink-dim); }
+  .ticker__track span b { color: var(--ink); }
+  .ticker__track span i { font-style: normal; color: var(--download); }
+  .ticker__track span u { text-decoration: none; color: var(--email); }
+  .ticker__track span.warn { color: var(--critical); }
+  @keyframes scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+  @media (prefers-reduced-motion: reduce) { .ticker__track { animation: none; } }
+
+  /* ============================================================= SECTIONS */
+  section.block { padding-top: 68px; scroll-margin-top: 80px; }
+  .kicker { font-family: var(--mono); font-size: 11px; letter-spacing: .2em; text-transform: uppercase; color: var(--accent); display: flex; align-items: baseline; gap: 12px; }
+  .kicker .idx { color: var(--ink-faint); }
+  h2 { font-family: var(--serif); font-weight: 600; font-size: clamp(1.7rem, 3.4vw, 2.5rem); letter-spacing: -0.01em; margin: 12px 0 0; text-wrap: balance; line-height: 1.1; }
+  h2 + p.intro { color: var(--ink-dim); max-width: 66ch; margin: 14px 0 0; font-size: 1.05rem; }
+  h3 { font-family: var(--sans); font-weight: 650; font-size: 1.05rem; margin: 30px 0 12px; letter-spacing: -0.005em; }
+  h4 { font-family: var(--mono); font-weight: 600; font-size: 11.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-faint); margin: 0 0 12px; }
+
+  /* callouts */
+  .note { border: 1px solid var(--line); border-left: 3px solid var(--accent-vivid); background: var(--accent-soft); border-radius: 10px; padding: 16px 20px; margin: 22px 0; font-size: 0.97rem; }
+  .note.crit { border-left-color: var(--critical); background: var(--critical-soft); }
+  .note.email { border-left-color: var(--email); background: var(--email-soft); }
+  .note .tag { font-family: var(--mono); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; font-weight: 700; display: inline-block; margin-bottom: 5px; }
+  .note.crit .tag { color: var(--critical); } .note .tag { color: var(--accent); } .note.email .tag { color: var(--email); }
+  .note p { margin: 6px 0 0; } .note p:first-of-type { margin-top: 0; }
+
+  /* backend legend cards */
+  .backends { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px,1fr)); gap: 14px; margin-top: 26px; }
+  .bcard { border: 1px solid var(--line); border-radius: 13px; padding: 18px 18px 16px; background: var(--surface); position: relative; overflow: hidden; }
+  .bcard .bhead { display: flex; align-items: center; gap: 9px; font-family: var(--mono); font-weight: 700; font-size: 13px; letter-spacing: .02em; }
+  .bcard dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 14px 0 0; font-size: 13px; }
+  .bcard dt { font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-faint); align-self: center; }
+  .bcard dd { margin: 0; font-family: var(--mono); color: var(--ink); font-size: 12px; word-break: break-word; }
+
+  /* ============================================================= SPEC SHEET */
+  .spec { border: 1px solid var(--line); border-radius: 16px; background: var(--surface); margin-top: 30px; overflow: hidden; scroll-margin-top: 80px; }
+  .spec__head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 18px 22px; border-bottom: 1px solid var(--line); background: linear-gradient(180deg, color-mix(in srgb, var(--accent-soft) 60%, transparent), transparent); }
+  .method { font-family: var(--mono); font-weight: 800; font-size: 12px; letter-spacing: .08em; padding: 4px 9px; border-radius: 6px; background: var(--ink); color: var(--ground); flex: none; }
+  .path { font-family: var(--mono); font-size: clamp(12.5px, 1.5vw, 15px); color: var(--ink); font-weight: 600; word-break: break-all; flex: 1 1 auto; min-width: 200px; }
+  .path .host { color: var(--ink-faint); }
+  .spec__caps { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip { font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: .04em; padding: 4px 9px; border-radius: 20px; border: 1px solid var(--line-strong); display: inline-flex; align-items: center; gap: 6px; color: var(--ink-dim); white-space: nowrap; }
+  .cap { font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: .05em; padding: 4px 10px; border-radius: 20px; white-space: nowrap; }
+  .cap--dl { color: var(--download); background: var(--download-soft); border: 1px solid color-mix(in srgb, var(--download) 34%, transparent); }
+  .cap--email { color: var(--email); background: var(--email-soft); border: 1px solid color-mix(in srgb, var(--email) 34%, transparent); }
+  .cap--none { color: var(--ink-faint); border: 1px dashed var(--line-strong); padding: 4px 10px; border-radius: 20px; font-family: var(--mono); font-size: 11px; }
+  .cap--maybe { color: var(--provisional); border: 1px dashed color-mix(in srgb, var(--provisional) 55%, transparent); padding: 4px 10px; border-radius: 20px; font-family: var(--mono); font-size: 11px; font-weight: 600; }
+  .spec__body { padding: 6px 22px 22px; }
+  .spec__lede { color: var(--ink-dim); margin: 16px 0 4px; max-width: 70ch; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-top: 20px; }
+  @media (max-width: 760px) { .grid2 { grid-template-columns: 1fr; } }
+
+  /* code panels */
+  .code { border-radius: 11px; overflow: hidden; border: 1px solid var(--code-line); background: var(--code-bg); }
+  .code__bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; background: rgba(255,255,255,0.03); border-bottom: 1px solid var(--code-line); }
+  .code__bar .lbl { font-family: var(--mono); font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: #7f918b; }
+  .code__bar .copy { font-family: var(--mono); font-size: 11px; color: #9fb0aa; background: transparent; border: 1px solid var(--code-line); border-radius: 6px; padding: 3px 9px; cursor: pointer; transition: all .15s; }
+  .code__bar .copy:hover { color: var(--code-str); border-color: color-mix(in srgb, var(--code-str) 50%, transparent); }
+  .code__bar .copy.done { color: var(--code-str); }
+  pre { margin: 0; padding: 15px 16px; overflow-x: auto; font-family: var(--mono); font-size: 12.8px; line-height: 1.62; color: var(--code-ink); tab-size: 2; }
+  pre code { font: inherit; color: inherit; }
+  .t-key { color: var(--code-key); } .t-str { color: var(--code-str); } .t-num { color: var(--code-num); }
+  .t-lit { color: var(--code-lit); } .t-com { color: var(--code-com); font-style: italic; } .t-hk { color: var(--code-num); }
+
+  /* field tables */
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 11px; margin-top: 6px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; min-width: 460px; }
+  thead th { font-family: var(--mono); font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-faint); text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--line-strong); font-weight: 600; background: var(--surface-2); position: sticky; top: 0; }
+  tbody td { padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: color-mix(in srgb, var(--accent-soft) 45%, transparent); }
+  td.f { font-family: var(--mono); font-weight: 600; color: var(--ink); white-space: nowrap; }
+  td.ty { font-family: var(--mono); color: var(--email); font-size: 12.5px; white-space: nowrap; }
+  td.req { text-align: center; }
+  .yes { color: var(--download); font-weight: 700; } .no { color: var(--ink-faint); }
+  code.inl { font-family: var(--mono); font-size: 0.86em; background: var(--surface-2); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; color: var(--ink); word-break: break-word; }
+  .flag { font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: .06em; padding: 1px 6px; border-radius: 4px; border: 1px dashed color-mix(in srgb, var(--provisional) 55%, transparent); color: var(--provisional); white-space: nowrap; }
+  .flag.gap { border-color: color-mix(in srgb, var(--critical) 45%, transparent); color: var(--critical); }
+
+  /* response tabs */
+  .resp { margin-top: 24px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .tabs { display: flex; gap: 2px; padding: 6px; background: var(--surface-2); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .tab { font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: .03em; padding: 7px 14px; border-radius: 8px; border: none; background: transparent; color: var(--ink-dim); cursor: pointer; display: inline-flex; align-items: center; gap: 7px; transition: background .15s, color .15s; }
+  .tab:hover { color: var(--ink); }
+  .tab[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 0 var(--line-strong); }
+  .tab .pip { width: 7px; height: 7px; border-radius: 50%; }
+  .tab .pip.dl { background: var(--download); } .tab .pip.em { background: var(--email); } .tab .pip.err { background: var(--critical); }
+  .tabpane { padding: 16px; display: none; }
+  .tabpane[data-open="true"] { display: block; }
+  .tabpane .cx { color: var(--ink-dim); font-size: 13px; margin: 12px 2px 0; }
+
+  /* gotchas */
+  .gotchas { margin-top: 22px; }
+  .gotchas ul { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
+  .gotchas li { position: relative; padding: 10px 14px 10px 38px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); font-size: 13.5px; color: var(--ink-dim); }
+  .gotchas li::before { content: "!"; position: absolute; left: 12px; top: 9px; width: 17px; height: 17px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-family: var(--mono); font-weight: 700; font-size: 11px; display: grid; place-items: center; }
+  .gotchas li b { color: var(--ink); }
+
+  /* matrix */
+  .matrix td .m-dl { color: var(--download); font-weight: 700; }
+  .matrix td .m-em { color: var(--email); font-weight: 700; }
+  .matrix td .m-no { color: var(--ink-faint); }
+  .matrix td .m-maybe { color: var(--provisional); font-weight: 600; }
+
+  /* security */
+  .flags { display: grid; gap: 18px; margin-top: 26px; }
+  .flagcard { border: 1px solid color-mix(in srgb, var(--critical) 30%, var(--line)); border-radius: 15px; overflow: hidden; background: var(--surface); }
+  .flagcard__head { display: flex; align-items: center; gap: 12px; padding: 16px 20px; background: var(--critical-soft); border-bottom: 1px solid color-mix(in srgb, var(--critical) 22%, transparent); }
+  .flagcard__head .sev { font-family: var(--mono); font-size: 11px; font-weight: 800; letter-spacing: .1em; color: #fff; background: var(--critical); padding: 4px 10px; border-radius: 6px; }
+  .flagcard__head h3 { margin: 0; font-size: 1.02rem; color: var(--ink); }
+  .flagcard__body { padding: 16px 20px; font-size: 0.96rem; color: var(--ink-dim); }
+  .flagcard__body b { color: var(--ink); }
+  .flagcard__body .mit { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line-strong); }
+  .flagcard__body .mit b { color: var(--download); }
+
+  /* footer */
+  footer { margin-top: 90px; padding-top: 28px; border-top: 1px solid var(--line); color: var(--ink-faint); font-size: 13px; display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between; align-items: baseline; }
+  footer .src { font-family: var(--mono); font-size: 11.5px; }
+  .prose p { max-width: 70ch; }
+  .prose p { color: var(--ink-dim); }
+</style>
+
+<div id="progress"></div>
+
+<div class="page">
+  <!-- ================= RAIL ================= -->
+  <aside class="rail">
+    <div class="rail__inner">
+      <div class="rail__brand">FinX · Field Reference<b>Android Report APIs</b></div>
+      <nav id="nav">
+        <span class="navlabel">Orient</span>
+        <a class="nav" href="#overview"><span class="num">00</span><span class="txt">The capture set</span></a>
+        <a class="nav" href="#backends"><span class="num">01</span><span class="txt">Backends &amp; auth</span></a>
+        <a class="nav" href="#enums"><span class="num">02</span><span class="txt">Enums &amp; RequestFor</span></a>
+        <span class="navlabel">Endpoints</span>
+        <a class="nav" href="#pnl"><span class="dot dot--net"></span><span class="txt">P&amp;L report</span></a>
+        <a class="nav" href="#ledger"><span class="dot dot--net"></span><span class="txt">Ledger report</span></a>
+        <a class="nav" href="#tax"><span class="dot dot--net"></span><span class="txt">Tax / Capital gain</span></a>
+        <a class="nav" href="#cml"><span class="dot dot--mis"></span><span class="txt">CML (Master List)</span></a>
+        <a class="nav" href="#contract"><span class="dot dot--go"></span><span class="txt">Contract notes</span></a>
+        <span class="navlabel">Reference</span>
+        <a class="nav" href="#matrix"><span class="num">03</span><span class="txt">Download vs Email</span></a>
+        <a class="nav" href="#types"><span class="num">04</span><span class="txt">Types → code</span></a>
+        <a class="nav" href="#security"><span class="num">05</span><span class="txt">Security flags</span></a>
+        <a class="nav" href="#gaps"><span class="num">06</span><span class="txt">Gaps still owed</span></a>
+      </nav>
+    </div>
+  </aside>
+
+  <!-- ================= MAIN ================= -->
+  <main class="main">
+
+    <!-- HERO -->
+    <header class="hero" id="top">
+      <div class="eyebrow">Field Reference · captured 2026·07·16 · sanitized</div>
+      <h1>The FinX <span class="mark">report APIs</span>,<br><span class="thin">as captured from</span> Android.</h1>
+      <p class="lede">Five endpoints across three backends that turn a client account into a <b>downloadable — or emailed</b> — P&amp;L, ledger, tax, master-list, or contract-note document. Every field, type, response shape, and trap, reconciled against the live captures and the code models that consume them.</p>
+
+      <div class="statstrip">
+        <div class="stat"><div class="big">5</div><div class="cap">Endpoints</div><div class="sub">+1 download sub-call</div></div>
+        <div class="stat"><div class="big">3</div><div class="cap">Backends</div><div class="sub">.NET · Go · MIS</div></div>
+        <div class="stat"><div class="big">2</div><div class="cap">Delivery modes</div><div class="sub">download &amp; email</div></div>
+        <div class="stat"><div class="big">4</div><div class="cap">Hosts</div><div class="sub">finx · api · mis · onmedia</div></div>
+      </div>
+
+      <div class="ticker" aria-hidden="true">
+        <div class="ticker__track" id="tick">
+          <span><b>POST</b> GetGlobalPNLPDF <i>200</i></span>
+          <span><b>POST</b> GetLedgerDetailsPDF <i>200</i></span>
+          <span><b>POST</b> GetTaxReportPDF <i>200</i> · PDF+XLSX</span>
+          <span><b>POST</b> /mis/reports/generate <i>200</i> · JWT</span>
+          <span><b>POST</b> report/contract <u>204</u></span>
+          <span class="warn">FLAG A · IDOR</span>
+          <span><b>POST</b> contract/download · %PDF</span>
+          <span class="warn">FLAG B · CloudFront cache</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- 00 OVERVIEW -->
+    <section class="block" id="overview">
+      <div class="kicker"><span class="idx">00</span> Orientation</div>
+      <h2>Two things to hold in your head first</h2>
+      <div class="note">
+        <span class="tag">Android is a capture source, not an API surface</span>
+        <p>These were captured from the Android app, but the <code class="inl">from:</code> header is a <b>client-build tag — not auth and not a source router</b> (live-tested). The same session+client returned <code class="inl">200</code> with the web tag, the android tag, a made-up tag, and no <code class="inl">from:</code> header at all. <b>One surface serves both web and android — never build source-specific endpoints.</b> What varies per platform is the SessionId (minted per login), never the endpoint. The one open question is CML/MIS, whose JWT carries <code class="inl">source: FINX_ANDROID</code> — source-gating there is unconfirmed.</p>
+      </div>
+      <div class="note email">
+        <span class="tag">✓ Email is supported alongside download</span>
+        <p>The three <code class="inl">.NET</code> file endpoints (<code class="inl">GetGlobalPNLPDF</code>, <code class="inl">GetLedgerDetailsPDF</code>, <code class="inl">GetTaxReportPDF</code>) take a <code class="inl">RequestFor</code> field that selects <b>download vs email</b>. <code class="inl">RequestFor: 1</code> = email is the only value constant across all three. Email is <b>live-confirmed</b> on P&amp;L and Tax, and <b>presumed</b> on Ledger (not yet fired). CML and Contract Notes have no email mode.</p>
+      </div>
+    </section>
+
+    <!-- 01 BACKENDS -->
+    <section class="block" id="backends">
+      <div class="kicker"><span class="idx">01</span> Infrastructure</div>
+      <h2>Three backends, three ways to authenticate</h2>
+      <p class="intro">The credential you send depends entirely on which backend you're hitting. The middleware pair wants the <b>SessionId</b>; the MIS backend behind CML wants the <b>SSO JWT</b>. Route the wrong one and CML fails.</p>
+
+      <div class="backends">
+        <div class="bcard">
+          <div class="bhead"><span class="dot dot--net"></span> Legacy middleware</div>
+          <dl>
+            <dt>Base</dt><dd>/api/middleware</dd>
+            <dt>Casing</dt><dd>PascalCase</dd>
+            <dt>Envelope</dt><dd>{Status, Response, Reason}</dd>
+            <dt>Auth</dt><dd>authorization: &lt;SessionId&gt; + SessionId in body</dd>
+          </dl>
+        </div>
+        <div class="bcard">
+          <div class="bhead"><span class="dot dot--go"></span> Go middleware</div>
+          <dl>
+            <dt>Base</dt><dd>/middleware-go</dd>
+            <dt>Casing</dt><dd>snake_case</dd>
+            <dt>Envelope</dt><dd>{StatusCode, Message, DevMessage, Body}</dd>
+            <dt>Auth</dt><dd>authorization: &lt;SessionId&gt; header only</dd>
+          </dl>
+        </div>
+        <div class="bcard">
+          <div class="bhead"><span class="dot dot--mis"></span> MIS reports · CML</div>
+          <dl>
+            <dt>Base</dt><dd>/mis/reports</dd>
+            <dt>Casing</dt><dd>camelCase</dd>
+            <dt>Envelope</dt><dd>{statusCode, message, devMessage, body}</dd>
+            <dt>Auth</dt><dd>authType: jwt + authorization: &lt;SSO JWT&gt; + source: FINX_ANDROID</dd>
+          </dl>
+        </div>
+      </div>
+
+      <h3>The error model has two layers</h3>
+      <div class="gotchas"><ul>
+        <li><b>Business failures are in-band.</b> HTTP <code class="inl">200</code> — branch on <code class="inl">Status</code>/<code class="inl">StatusCode</code> in the body. <code class="inl">Response</code> is <code class="inl">null</code> (not <code class="inl">[]</code>) when there's no data.</li>
+        <li><b>Auth failures are a real HTTP <code class="inl">401</code>.</b> Detect by status code, not body shape — the two 401 envelopes differ: <code class="inl">.NET</code> sends <code class="inl">{"Status":"Fail","Response":"","Reason":"Invalid SessionId"}</code> with header <code class="inl">authstatus: Unauthorized</code>; MIS sends <code class="inl">{"statusCode":401,"message":"Invalid Request."...}</code>.</li>
+        <li><b>"Invalid SessionId" = session↔client mismatch,</b> not necessarily an expired token. The <code class="inl">.NET</code> backend binds a SessionId to one ClientId; a valid session for <code class="inl">X008593</code> returned <code class="inl">401</code> for a different client and <code class="inl">200</code> for its own. Always send the ClientId the session belongs to.</li>
+      </ul></div>
+    </section>
+
+    <!-- 02 ENUMS -->
+    <section class="block" id="enums">
+      <div class="kicker"><span class="idx">02</span> The one field that lies</div>
+      <h2>Enums &amp; the <span style="font-family:var(--mono);font-size:0.82em">RequestFor</span> fork</h2>
+      <p class="intro">The Android app's own Kotlin enums are authoritative where they apply — but <code class="inl">RequestFor</code> does <b>not</b> follow them uniformly. Email is the only value you can trust across endpoints.</p>
+
+      <div class="grid2">
+        <div>
+          <h4>App enums (Kotlin source)</h4>
+          <div class="code">
+            <div class="code__bar"><span class="lbl">enums</span><button class="copy" type="button">copy</button></div>
+<pre data-lang="kotlin"><code>enum class ViewType(val serverValue: Int) {
+  Mail(1),  Download(2)
+}
+enum class FileFormatType(val serverValue: Int) {
+  Pdf(1),   Excel(2)
+}</code></pre>
+          </div>
+        </div>
+        <div>
+          <h4>Observed RequestFor per endpoint</h4>
+          <div class="tablewrap"><table>
+            <thead><tr><th>Endpoint</th><th>Download</th><th>Email</th><th>Follows ViewType?</th></tr></thead>
+            <tbody>
+              <tr><td class="f">GetGlobalPNLPDF</td><td class="ty">0</td><td class="ty">1</td><td class="no">No — dl is 0</td></tr>
+              <tr><td class="f">GetLedgerDetailsPDF</td><td class="ty">0</td><td class="ty">1 <span class="flag">CONFIRM</span></td><td class="no">No — dl is 0</td></tr>
+              <tr><td class="f">GetTaxReportPDF</td><td class="ty">2</td><td class="ty">1</td><td class="yes">Yes</td></tr>
+            </tbody>
+          </table></div>
+        </div>
+      </div>
+      <div class="note">
+        <span class="tag">Rule</span>
+        <p><code class="inl">RequestFor = 1</code> = Email is the only cross-endpoint constant. The download value forks — Tax uses <code class="inl">2</code>, P&amp;L and Ledger use <code class="inl">0</code>. <b>Do not centralize <code class="inl">RequestFor</code> behind one shared constant — hardcode it per endpoint.</b> <code class="inl">FileFormat</code> (1=PDF, 2=Excel) is consistent wherever it appears (Tax only, so far).</p>
+      </div>
+    </section>
+
+    <!-- ============ ENDPOINT 1: PNL ============ -->
+    <article class="spec" id="pnl">
+      <div class="spec__head">
+        <span class="method">POST</span>
+        <span class="path">/api/middleware/<b>GetGlobalPNLPDF</b></span>
+        <span class="spec__caps"><span class="chip"><span class="dot dot--net"></span>.NET</span><span class="cap cap--dl">↓ Download</span><span class="cap cap--email">✉ Email</span></span>
+      </div>
+      <div class="spec__body">
+        <p class="spec__lede">Delivers the Profit &amp; Loss report as a downloadable PDF, or emails it to the registered address. PDF only — no Excel.</p>
+
+        <div class="grid2">
+          <div>
+            <h4>Headers</h4>
+            <div class="code"><div class="code__bar"><span class="lbl">http</span><button class="copy" type="button">copy</button></div>
+<pre data-lang="http"><code>authorization: &lt;SessionId&gt;
+from: android_9.2.1.260709   # any stable build tag; not auth
+content-type: application/json</code></pre></div>
+            <h4 style="margin-top:22px">Request example</h4>
+            <div class="code"><div class="code__bar"><span class="lbl">json</span><button class="copy" type="button">copy</button></div>
+<pre data-lang="json"><code>{
+  "ClientId": "X04883",
+  "UserId": "X04883",
+  "Group": "Cash",
+  "FromDate": "2026-04-01",
+  "ToDate": "2026-07-21",
+  "RequestFor": 0,
+  "With_Exp": true,
+  "SessionId": "&lt;SessionId&gt;"
+}</code></pre></div>
+          </div>
+          <div>
+            <h4>Body fields — model <code class="inl">PnlPdfRequest</code></h4>
+            <div class="tablewrap"><table>
+              <thead><tr><th>Field</th><th>Type</th><th>Req</th><th>Notes</th></tr></thead>
+              <tbody>
+                <tr><td class="f">ClientId</td><td class="ty">str</td><td class="req"><span class="yes">●</span></td><td>trading account code</td></tr>
+                <tr><td class="f">UserId</td><td class="ty">str</td><td class="req"><span class="yes">●</span></td><td><b>== ClientId</b></td></tr>
+                <tr><td class="f">Group</td><td class="ty">str</td><td class="req"><span class="yes">●</span></td><td><code class="inl">Cash</code> Equity · <code class="inl">Derv</code> F&amp;O · <code class="inl">Comm</code> Commodity. Never show "Derv" to a customer.</td></tr>
+                <tr><td class="f">FromDate</td><td class="ty">str</td><td class="req"><span class="yes">●</span></td><td>YYYY-MM-DD</td></tr>
+                <tr><td class="f">ToDate</td><td class="ty">str</td><td class="req"><span class="yes">●</span></td><td>YYYY-MM-DD</td></tr>
+                <tr><td class="f">RequestFor</td><td class="ty">int</td><td class="req"><span class="yes">●</span></td><td><b>0 = download · 1 = email</b></td></tr>
+                <tr><td class="f">With_Exp</td><td class="ty">bool</td><td class="req"><span class="no">∘</span></td><td>boolean here (data API uses int <code class="inl">1</code>)</td></tr>
+                <tr><td class="f">SessionId</td><td class="ty">str</td><td class="req"><span class="yes">●</span></td><td>matches the header</td></tr>
+              </tbody>
+            </table></div>
+          </div>
+        </div>
+
+        <h4 style="margin-top:26px">Response</h4>
+        <div class="resp" data-tabs>
+          <div class="tabs" role="tablist">
+            <button class="tab" role="tab" aria-selected="true" data-pane="pnl-dl"><span class="pip dl"></span>Download · RequestFor 0</button>
+            <button class="tab" role="tab" aria-selected="false" data-pane="pnl-em"><span class="pip em"></span>Email · RequestFor 1</button>
+            <button class="tab" role="tab" aria-selected="false" data-pane="pnl-err"><span class="pip err"></span>No data</button>
+          </div>
+          <div class="tabpane" data-open="true" id="pnl-dl">
+            <div class="code"><div class="code__bar"><span class="lbl">200 · live-confirmed</span><button class="copy" type="button">copy</button></div>
+<pre data-lang="json"><code>{
+  "Status": "Success",
+  "Response": "https://client-report.choiceindia.com/PDFReports/PNLReport_&lt;id&gt;_&lt;ClientId&gt;.pdf",
+  "Reason": ""
+}</code></pre></div>
+            <p class="cx"><code class="inl">Response</code> is a report URL string. Sensitive &amp; effectively unauthenticated — fetch server-side, never surface or log it.</p>
+          </div>
+          <div class="tabpane" id="pnl-em">
+            <div class="code"><div class="code__bar"><span class="lbl">200 · live-confirmed</span><button class="copy" type="button">copy</button></div>
+<pre data-lang="json"><code>{
+  "Status": "Success",
+  "Response": "PnL Report mail sent successfully to &lt;REGISTERED_EMAIL, UPPERCASED&gt;",
+  "Reason": ""
+}</code></pre></div>
+            <p class="cx">⚠ The confirmation string <b>leaks the full registered email (uppercased)</b>. Mask before any display — <code class="inl">san***.harsha@gmail.com</code>.</p>
+          </div>
+          <div class="tabpane" id="pnl-err">
+            <div class="code"><div class="code__bar"><span class="lbl">200 · Fail</span><button class="copy" type="button">copy</button></div>
+<pre data-lang="json"><code>{ "Status": "Fail", "Response": null, "Reason": "Data not found." }</code></pre></div>
+            <p class="cx">HTTP 200 with <code class="inl">Status: "Fail"</code> — distinct from the auth-layer 401.</p>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ============ ENDPOINT 2: LEDGER ============ -->
+    <article class="spec" id="ledger">
+      <div class="spec__head">
+        <span class="method">POST</span>
+        <span class="path">/api/middleware/<b>GetLedgerDetailsPDF</b></span>
+        <span class="spec__caps"><span class="chip"><span class="dot dot--net"></span>.NET</span><span class="cap cap--dl">↓ Download</span><span class="cap--maybe">✉ Email — presumed</span></span>
+      </div>
+      <div class="spec__body">
+        <p class="spec__lede">Delivers the account ledger as a PDF. Also the intended MTF-ledger endpoint, though the <code class="inl">Margin</code> discriminator is unconfirmed.</p>
+
+        <div class="grid2">
+          <div>
+            <h4>Headers</h4>
+            <div class="code"><div class="code__bar"><span class="lbl">http</span><button class="copy" type="button">copy</button></div>
+<pre data-lang="http"><code>Authorization: &lt;SessionId&gt;
+from: android_9.2.2.260710
+content-type: application/json</code></pre></div>
+            <h4 style="margin-top:22px">Request example</h4>
+            <div class="code"><div class="code__bar"><span class="lbl">json</span><button class="copy" type="button">copy</button></div>
+<pre data-lang="json"><code>{
+  "ClientId": "X04883",
+  "LoginId": "X04883",
+  "Group": "GROUP1",
+  "Margin": 0,
+  "FromDate": "2026-07-01",
+  "ToDate": "2026-07-22",
+  "RequestFor": 0,
+  "SessionId": "&lt;SessionId&gt;"
+}</code></pre></div>
+          </div>
+          <div>
+            <h4>Body fields — model <code class="inl">LedgerPdfRequest</code></h4>
+            <div class="tablewrap"><table>
+              <thead><tr><th>Field</th><th>Type</th><th>Req</th><th>Notes</th></tr></thead>
+              <tbody>
+                <tr><td class="f">ClientId</td><td class="ty">str</td><td class="req"><span class="yes">●</span></td><td>trading account code</td></tr>
+                <tr><td class="f">LoginId</td><td class="ty">str</td><td class="req"><span class="yes">●</span></td><td><b>the client code</b> — NOT the <code class="inl">"JIFFY"</code> literal the data API uses</td></tr>
+                <tr><td class="f">Group</td><td class="ty">str</td><td class="req"><span class="no">∘</span></td><td><b>UPPERCASE</b> <code class="inl">"GROUP1"</code> (data API uses <code class="inl">"Group1"</code>)</td></tr>
+                <tr><td class="f">Margin</td><td class="ty">int</td><td class="req"><span class="no">∘</span></td><td>0 = normal. <b>1 = MTF unconfirmed</b> <span class="flag">CONFIRM</span> — byte-identical on the no-MTF test account</td></tr>
+                <tr><td class="f">FromDate</td><td class="ty">str</td><td class="req"><span class="yes">●</span></td><td>YYYY-MM-DD</td></tr>
+                <tr><td class="f">ToDate</td><td class="ty">str</td><td class="req"><span class="yes">●</span></td><td>YYYY-MM-DD</td></tr>
+                <tr><td class="f">RequestFor</td><td class="ty">int</td><td class="req"><span class="no">∘</span></td><td>0 = download; email presumed 1 <span class="flag">CONFIRM</span></td></tr>
+                <tr><td class="f">SessionId</td><td class="ty">str</td><td class="req"><span class="yes">●</span></td><td>matches the header</td></tr>
+              </tbody>
+            </table></div>
+          </div>
+        </div>
+
+        <h4 style="margin-top:26px">Response</h4>
+        <div class="resp" data-tabs>
+          <div class="tabs" role="tablist">
+            <button class="tab" role="tab" aria-selected="true" data-pane="led-dl"><span class="pip dl"></span>Download · RequestFor 0</button>
+            <button class="tab" role="tab" aria-selected="false" data-pane="led-em"><span class="pip em"></span>Email · presumed</button>
+            <button class="tab" role="tab" aria-selected="false" data-pane="led-err"><span class="pip err"></span>No data</button>
+          </div>
+          <div class="tabpane" data-open="true" id="led-dl">
+            <div class="code"><div class="code__bar"><span class="lbl">200 · live-confirmed</span><button class="copy" type="button">copy</button></div>
+<pre data-lang="json"><code>{
+  "Status": "Success",
+  "Response": "https://client-report.choiceindia.com/PDFReports/&lt;REPORTID&gt;_&lt;ClientId&gt;.pdf",
+  "Reason": ""
+}</code></pre></div>
+            <p class="cx">URL fetched → valid <code class="inl">%PDF</code>, ~60 KB.</p>
+          </div>
+          <div class="tabpane" id="led-em">
+            <div class="code"><div class="code__bar"><span class="lbl">presumed — not captured</span><button class="copy" type="button">copy</button></div>
+<pre data-lang="json"><code>{
+  "Status": "Success",
+  "Response": "... mail sent successfully to &lt;EMAIL&gt;",
+  "Reason": ""
+}</code></pre></div>
+            <p class="cx">By the <code class="inl">RequestFor:1</code> rule the email branch should mirror P&amp;L — but it was never fired (consent: no email branches). <span class="flag">CONFIRM</span></p>
+          </div>
+          <div class="tabpane" id="led-err">
+            <div class="code"><div class="code__bar"><span class="lbl">200 · Fail</span><button class="copy" type="button">copy</button></div>
+<pre data-lang="json"><code>{ "Status": "Fail", "Response": null, "Reason": "Data not found." }</code></pre></div>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ============ ENDPOINT 3: TAX ============ -->
+    <article class="spec" id="tax">
+      <div class="spec__head">
+        <span class="method">POST</span>
+        <span class="path">/api/middleware/<b>GetTaxReportPDF</b></span>
+        <span class="spec__caps"><span class="chip"><span class="dot dot--net"></span>.NET</span><span class="cap cap--dl">↓ Download</span><span class="cap cap--email">✉ Email</span><span class="chip">PDF / XLSX</span></span>
+      </div>
+      <div class="spec__body">
+        <p class="spec__lede">The only Android endpoint offering both a <b>format choice</b> (PDF or Excel) and both <b>delivery modes</b>. Capital-Gain intent routes here — there is no separate CG API.</p>
+
+        <div class="grid2">
+          <div>
+            <h4>Headers</h4>
+            <div class="code"><div class="code__bar"><span class="lbl">http</span><button class="copy" type="button">copy</button></div>
+<pre data-lang="http"><code>authorization: &lt;SessionId&gt;
+from: android_9.2.2.260710
+content-type: application/json</code></pre></div>
+            <h4 style="margin-top:22px">Request example</h4>
+            <div class="code"><div class="code__bar"><span class="lbl">json — Excel + download</span><button class="copy" type="button">copy</button></div>
+<pre data-lang="json"><code>{
+  "ClientId": "X04883",
+  "FinYear": "2024-2025",
+  "RequestFor": 2,
+  "FileFormat": 2,
+  "SessionId": "&lt;SessionId&gt;"
+}</code></pre></div>
+          </div>
+          <div>
+            <h4>Body fields — model <code class="inl">TaxReportRequest</code></h4>
+            <div class="tablewrap"><table>
+              <thead><tr><th>Field</th><th>Type</th><th>Req</th><th>Notes</th></tr></thead>
+              <tbody>
+                <tr><td class="f">ClientId</td><td class="ty">str</td><td class="req"><span class="yes">●</span></td><td>trading account code</td></tr>
+                <tr><td class="f">FinYear</td><td class="ty">str</td><td class="req"><span class="yes">●</span></td><td><b>YYYY-YYYY</b> financial year (not a date range). Window is dynamic — current + last 2 FYs; never hardcode.</td></tr>
+                <tr><td class="f">RequestFor</td><td class="ty">int</td><td class="req"><span class="yes">●</span></td><td><b>2 = download · 1 = email</b> (ViewType-compliant here)</td></tr>
+                <tr><td class="f">FileFormat</td><td class="ty">int</td><td class="req"><span class="yes">●</span></td><td><b>1 = PDF · 2 = Excel</b></td></tr>
+                <tr><td class="f">SessionId</td><td class="ty">str</td><td class="req"><span class="yes">●</span></td><td>matches the header</td></tr>
+              </tbody>
+            </table></div>
+            <div class="note" style="margin-top:16px"><span class="tag">Wording trap</span><p>Failure <code class="inl">Reason</code> here is <b>"Data not available."</b> — vs "Data not found." on P&amp;L/Ledger. Branch on <code class="inl">Status</code>, never string-match one Reason.</p></div>
+          </div>
+        </div>
+
+        <h4 style="margin-top:26px">Response</h4>
+        <div class="resp" data-tabs>
+          <div class="tabs" role="tablist">
+            <button class="tab" role="tab" aria-selected="true" data-pane="tax-dl"><span class="pip dl"></span>Download · PDF / Excel</button>
+            <button class="tab" role="tab" aria-selected="false" data-pane="tax-em"><span class="pip em"></span>Email · RequestFor 1</button>
+            <button class="tab" role="tab" aria-selected="false" data-pane="tax-err"><span class="pip err"></span>No data</button>
+          </div>
+          <div class="tabpane" data-open="true" id="tax-dl">
+            <div class="code"><div class="code__bar"><span class="lbl">200 · live-confirmed · URL shape by format</span><button class="copy" type="button">copy</button></div>
+<pre data-lang="json"><code>// PDF  (FileFormat 1)
+"Response": ".../PDFReports/&lt;REPORTID&gt;_&lt;ClientId&gt;.pdf"        // → valid %PDF
+// Excel (FileFormat 2)
+"Response": ".../PDFReports/&lt;REPORTID&gt;_&lt;ClientId&gt;_&lt;epoch&gt;.xlsx" // → valid PK zip</code></pre></div>
+            <p class="cx"><code class="inl">Response</code> is a string file URL (not an array). Excel adds a numeric suffix and the <code class="inl">.xlsx</code> extension.</p>
+          </div>
+          <div class="tabpane" id="tax-em">
+            <div class="code"><div class="code__bar"><span class="lbl">200</span><button class="copy" type="button">copy</button></div>
+<pre data-lang="json"><code>{ "Status": "Success", "Response": "... mail sent successfully to &lt;EMAIL&gt;", "Reason": "" }</code></pre></div>
+            <p class="cx">Same polymorphic <code class="inl">Response</code> — mask the leaked email.</p>
+          </div>
+          <div class="tabpane" id="tax-err">
+            <div class="code"><div class="code__bar"><span class="lbl">200 · Fail</span><button class="copy" type="button">copy</button></div>
+<pre data-lang="json"><code>{ "Status": "Fail", "Response": null, "Reason": "Data not available." }</code></pre></div>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ============ ENDPOINT 4: CML ============ -->
+    <article class="spec" id="cml">
+      <div class="spec__head">
+        <span class="method">POST</span>
+        <span class="path"><span class="host">finx.choiceindia.com</span>/mis/reports/<b>generate</b></span>
+        <span class="spec__caps"><span class="chip"><span class="dot dot--mis"></span>MIS · JWT</span><span class="cap cap--dl">↓ Signed URL</span><span class="cap--none">no email</span></span>
+      </div>
+      <div class="spec__body">
+        <p class="spec__lede">Generates the Client Master List. This is the <b>JWT-authed backend</b> — it takes the SSO <code class="inl">accessToken</code>, not the SessionId. The request shape reads like a generic report generator; only <code class="inl">cml</code> is confirmed.</p>
+
+        <div class="grid2">
+          <div>
+            <h4>Headers</h4>
+            <div class="code"><div class="code__bar"><span class="lbl">http</span><button class="copy" type="button">copy</button></div>
+<pre data-lang="http"><code>authType: jwt
+source: FINX_ANDROID
+authorization: &lt;SSO JWT = frontend accessToken&gt;   # NOT the SessionId
+from: android_9.2.2.260710
+content-type: application/json</code></pre></div>
+            <h4 style="margin-top:22px">Request — model <code class="inl">CmlRequest</code></h4>
+            <div class="code"><div class="code__bar"><span class="lbl">json</span><button class="copy" type="button">copy</button></div>
+<pre data-lang="json"><code>{
+  "reportType": "cml",
+  "searchBy": "client-id",
+  "searchValue": "X04883"
+}</code></pre></div>
+          </div>
+          <div>
+            <h4>Response — 200 · live-captured · <span style="text-transform:none">camelCase envelope</span></h4>
+            <div class="code"><div class="code__bar"><span class="lbl">json → CmlBody.cmlLink</span><button class="copy" type="button">copy</button></div>
+<pre data-lang="json"><code>{
+  "statusCode": 200,
+  "message": "URL generated successfully",
+  "devMessage": null,
+  "body": {
+    "cmlLink": "https://onmedia.choiceindia.com/JF/&lt;hash&gt;_CML_&lt;ts&gt;.pdf?X-Amz-Expires=120&amp;X-Amz-Signature=&lt;MASKED&gt;"
+  }
+}</code></pre></div>
+            <div class="gotchas"><ul>
+              <li>Link field is <b><code class="inl">body.cmlLink</code></b> — an AWS S3 SigV4 pre-signed URL fronted by CloudFront.</li>
+              <li>Downloads as <code class="inl">Client_Master_List.pdf</code> (<code class="inl">%PDF-1.6</code>, 9002 bytes).</li>
+              <li>Object timestamp shows a <b>static pre-generated S3 file</b> — the PDF may be stale vs the current master list.</li>
+            </ul></div>
+          </div>
+        </div>
+
+        <div class="note crit" style="margin-top:24px">
+          <span class="tag">🔴 Security — Flag B</span>
+          <p>The <code class="inl">X-Amz-Expires=120</code> "single-use" assumption is <b>false in practice</b>. CloudFront caches by path only (ignoring the signed query string), so once any valid link warms the edge the same S3 path is served for the CloudFront TTL regardless of signature expiry, and repeat fetches succeed. Don't treat 120s/single-use as a boundary — fetch server-side and never surface the link. <a href="#security">Full detail →</a></p>
+        </div>
+        <p class="cx" style="margin-left:2px">Auth failure (HTTP 401): <code class="inl">{"statusCode":401,"message":"Invalid Request.","devMessage":null,"body":{}}</code></p>
+      </div>
+    </article>
+
+    <!-- ============ ENDPOINT 5: CONTRACT ============ -->
+    <article class="spec" id="contract">
+      <div class="spec__head">
+        <span class="method">POST</span>
+        <span class="path">/middleware-go/report/<b>contract</b></span>
+        <span class="spec__caps"><span class="chip"><span class="dot dot--go"></span>Go</span><span class="chip">list → download</span><span class="cap--none">no email</span></span>
+      </div>
+      <div class="spec__body">
+        <p class="spec__lede">Lists a client's contract notes over a date range. Delivery is a two-step: list the notes, then pull each one's raw PDF from a separate download endpoint on a different host.</p>
+
+        <div class="grid2">
+          <div>
+            <h4>List headers &amp; request — <code class="inl">ContractNoteListRequest</code></h4>
+            <div class="code"><div class="code__bar"><span class="lbl">http · no SessionId in body (Go)</span><button class="copy" type="button">copy</button></div>
+<pre data-lang="http"><code>authorization: &lt;SessionId&gt;
+from: android_9.2.2.260710
+content-type: application/json</code></pre></div>
+            <div class="code" style="margin-top:10px"><div class="code__bar"><span class="lbl">json</span><button class="copy" type="button">copy</button></div>
+<pre data-lang="json"><code>{
+  "client_id": "X04883",
+  "from_date": "2024-07-15",
+  "to_date": "2026-07-15"
+}</code></pre></div>
+          </div>
+          <div>
+            <h4>Per-note fields — model <code class="inl">ContractNote</code></h4>
+            <div class="tablewrap"><table>
+              <thead><tr><th>Field</th><th>Type</th><th>Notes</th></tr></thead>
+              <tbody>
+                <tr><td class="f">date</td><td class="ty">str</td><td><b>DDMMYYYY</b> — this IS the trade date</td></tr>
+                <tr><td class="f">file_id</td><td class="ty">str</td><td>~88-char opaque token — the download handle. Sensitive, server-side only.</td></tr>
+                <tr><td class="f">group</td><td class="ty">str</td><td>only <code class="inl">Grp1</code> seen; casing varies (<code class="inl">Grp1</code>/<code class="inl">GRP1</code>) → match case-insensitively</td></tr>
+                <tr><td class="f">id</td><td class="ty">str</td><td><b>redundant — always == date.</b> Key rows by <code class="inl">file_id</code>, never <code class="inl">id</code>.</td></tr>
+                <tr><td class="f">invoice_number</td><td class="ty">str</td><td>contract-note invoice number</td></tr>
+              </tbody>
+            </table></div>
+          </div>
+        </div>
+
+        <h4 style="margin-top:26px">List response</h4>
+        <div class="resp" data-tabs>
+          <div class="tabs" role="tablist">
+            <button class="tab" role="tab" aria-selected="true" data-pane="cn-ok"><span class="pip dl"></span>Success · 200</button>
+            <button class="tab" role="tab" aria-selected="false" data-pane="cn-empty"><span class="pip em"></span>No data · 204</button>
+          </div>
+          <div class="tabpane" data-open="true" id="cn-ok">
+            <div class="code"><div class="code__bar"><span class="lbl">200 · mixed casing</span><button class="copy" type="button">copy</button></div>
+<pre data-lang="json"><code>{
+  "StatusCode": 200, "Message": "Success", "DevMessage": null,
+  "Body": {
+    "client_code": "X04883",
+    "contractNotes": [
+      { "date": "16092024", "file_id": "&lt;~88-char token&gt;",
+        "group": "Grp1", "id": "16092024", "invoice_number": "2140106" }
+    ]
+  }
+}</code></pre></div>
+            <p class="cx">Envelope PascalCase, list key <code class="inl">contractNotes</code> camelCase, note fields snake_case — all in one payload.</p>
+          </div>
+          <div class="tabpane" id="cn-empty">
+            <div class="code"><div class="code__bar"><span class="lbl">204 · empty but successful</span><button class="copy" type="button">copy</button></div>
+<pre data-lang="json"><code>{
+  "StatusCode": 204,
+  "Message": "No valid contract notes found for the given clientId and date range",
+  "DevMessage": null,
+  "Body": {}
+}</code></pre></div>
+            <p class="cx"><code class="inl">Body</code> is <code class="inl">{}</code> on the 204 branch — no <code class="inl">client_code</code>/<code class="inl">contractNotes</code>.</p>
+          </div>
+        </div>
+
+        <h4 style="margin-top:26px">Sub-call — per-note download</h4>
+        <div class="spec__head" style="border-radius:11px;border:1px solid var(--line);margin-top:4px">
+          <span class="method">POST</span>
+          <span class="path"><span class="host">api.choiceindia.com</span>/middleware-go/contract/<b>download</b></span>
+          <span class="spec__caps"><span class="chip">raw PDF bytes</span></span>
+        </div>
+        <div class="grid2" style="margin-top:16px">
+          <div>
+            <div class="code"><div class="code__bar"><span class="lbl">http · note the "Session " prefix</span><button class="copy" type="button">copy</button></div>
+<pre data-lang="http"><code>authorization: Session &lt;SessionId&gt;
+content-type: application/json</code></pre></div>
+            <div class="code" style="margin-top:10px"><div class="code__bar"><span class="lbl">json · ContractNoteDownloadRequest</span><button class="copy" type="button">copy</button></div>
+<pre data-lang="json"><code>{
+  "client_code": "X008593",
+  "file_id": "&lt;from the list response&gt;"
+}</code></pre></div>
+          </div>
+          <div>
+            <div class="gotchas"><ul>
+              <li>Returns the <b>raw PDF bytes directly</b> (<code class="inl">application/pdf</code>, <code class="inl">%PDF-1.4</code>) — no JSON envelope. Code type: <code class="inl">ContractNoteDownloadResponse = bytes</code>.</li>
+              <li><code class="inl">content-disposition: attachment; filename=CN_&lt;ClientId&gt;_&lt;group&gt;_&lt;invoice&gt;.PDF</code></li>
+              <li>Different host (<code class="inl">api.choiceindia.com</code>) but same <code class="inl">/middleware-go</code> prefix. No signed URL / expiry — fetch server-side and stream as a file card.</li>
+            </ul></div>
+          </div>
+        </div>
+
+        <div class="note crit" style="margin-top:22px">
+          <span class="tag">🔴 Security — Flag A</span>
+          <p>Both the list and the download endpoint enforced <b>no authentication</b> in testing — full data returned with garbage or absent credentials, authorizing purely on the body <code class="inl">client_id</code>/<code class="inl">client_code</code>. The entire chain (list <code class="inl">file_id</code>s → download PDFs) is reachable with only a client code. Never proxy a user-supplied one. <a href="#security">Full detail →</a></p>
+        </div>
+      </div>
+    </article>
+
+    <!-- 03 MATRIX -->
+    <section class="block" id="matrix">
+      <div class="kicker"><span class="idx">03</span> At a glance</div>
+      <h2>Download vs Email, every endpoint</h2>
+      <div class="tablewrap matrix" style="margin-top:22px"><table>
+        <thead><tr><th>Endpoint</th><th>Download</th><th>Email (RequestFor 1)</th><th>Formats</th><th>Delivery payload</th></tr></thead>
+        <tbody>
+          <tr><td class="f">GetGlobalPNLPDF</td><td><span class="m-dl">✓ RequestFor 0</span></td><td><span class="m-em">✓ live</span></td><td>PDF</td><td>URL / email confirmation</td></tr>
+          <tr><td class="f">GetLedgerDetailsPDF</td><td><span class="m-dl">✓ RequestFor 0</span></td><td><span class="m-maybe">~ presumed</span></td><td>PDF</td><td>URL / (presumed) confirmation</td></tr>
+          <tr><td class="f">GetTaxReportPDF</td><td><span class="m-dl">✓ RequestFor 2</span></td><td><span class="m-em">✓ live</span></td><td>PDF · Excel</td><td>URL / confirmation</td></tr>
+          <tr><td class="f">/mis/reports/generate</td><td><span class="m-dl">✓ signed URL</span></td><td><span class="m-no">— none</span></td><td>PDF</td><td>body.cmlLink</td></tr>
+          <tr><td class="f">/report/contract</td><td><span class="m-dl">✓ via download</span></td><td><span class="m-no">— none</span></td><td>PDF</td><td>list → per-note raw bytes</td></tr>
+        </tbody>
+      </table></div>
+      <div class="note email"><span class="tag">Email specifics</span><p>On the three <code class="inl">.NET</code> endpoints, email mode returns <code class="inl">Status: "Success"</code> with <code class="inl">Response</code> = a confirmation string containing the <b>full registered email, uppercased</b> — always mask. <code class="inl">Response</code> is polymorphic; the <code class="inl">FileDeliveryResponse</code> model exposes <code class="inl">is_download_url()</code> / <code class="inl">is_email_confirmation()</code> to branch safely.</p></div>
+    </section>
+
+    <!-- 04 TYPES -->
+    <section class="block" id="types">
+      <div class="kicker"><span class="idx">04</span> Wiring</div>
+      <h2>Types → code map</h2>
+      <p class="intro">Every endpoint's request and response, as modelled in <code class="inl">app/finx/models.py</code>. Request models use <code class="inl">extra="forbid"</code>; bodies use <code class="inl">extra="ignore"</code>.</p>
+      <div class="tablewrap" style="margin-top:22px"><table>
+        <thead><tr><th>API</th><th>Request model</th><th>Response model / type</th></tr></thead>
+        <tbody>
+          <tr><td class="f">GetGlobalPNLPDF</td><td class="ty">PnlPdfRequest</td><td class="ty">FileDeliveryResponse</td></tr>
+          <tr><td class="f">GetLedgerDetailsPDF</td><td class="ty">LedgerPdfRequest</td><td class="ty">FileDeliveryResponse</td></tr>
+          <tr><td class="f">GetTaxReportPDF</td><td class="ty">TaxReportRequest</td><td class="ty">FileDeliveryResponse</td></tr>
+          <tr><td class="f">/mis/reports/generate</td><td class="ty">CmlRequest</td><td class="ty">CmlBody · cmlLink</td></tr>
+          <tr><td class="f">/report/contract</td><td class="ty">ContractNoteListRequest</td><td class="ty">ContractNoteListBody → ContractNote[]</td></tr>
+          <tr><td class="f">/contract/download</td><td class="ty">ContractNoteDownloadRequest</td><td class="ty">bytes</td></tr>
+        </tbody>
+      </table></div>
+      <h3>The shared polymorphic response</h3>
+      <div class="code" style="margin-top:6px"><div class="code__bar"><span class="lbl">python · one model for all three file endpoints</span><button class="copy" type="button">copy</button></div>
+<pre data-lang="json"><code>class FileDeliveryResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    Status: str
+    Response: str | None = None    # URL on download, confirmation on email
+    Reason: str | None = None
+    def is_email_confirmation(self): ...  # "mail sent" in Response
+    def is_download_url(self): ...        # Response starts with http</code></pre></div>
+    </section>
+
+    <!-- 05 SECURITY -->
+    <section class="block" id="security">
+      <div class="kicker"><span class="idx">05</span> Live-production observations</div>
+      <h2>Security flags</h2>
+      <p class="intro">These are observations on live Choice/FinX infrastructure, not chatbot bugs — reported so the Jini backend can defend against them and the FinX team can be notified. Not exploited: a single <code class="inl">X99999</code> probe confirmed Flag A; no real client IDs were enumerated.</p>
+      <div class="flags">
+        <div class="flagcard">
+          <div class="flagcard__head"><span class="sev">FLAG A</span><h3>Contract-note chain has no authentication (IDOR / BOLA)</h3></div>
+          <div class="flagcard__body">
+            <p>Both <code class="inl">/middleware-go/report/contract</code> (list) and <code class="inl">/contract/download</code> authorized purely on the body <code class="inl">client_id</code>/<code class="inl">client_code</code> — returning HTTP 200 + full data with garbage or absent <code class="inl">authorization</code>. Any known client's contract notes and their <code class="inl">file_id</code> PDF handles appear retrievable unauthenticated.</p>
+            <div class="mit"><b>Mitigation:</b> enforce client-ownership server-side against the authenticated widget session; treat <code class="inl">file_id</code> as sensitive; report upstream.</div>
+          </div>
+        </div>
+        <div class="flagcard">
+          <div class="flagcard__head"><span class="sev">FLAG B</span><h3>CML signed-URL controls nullified by CloudFront caching</h3></div>
+          <div class="flagcard__body">
+            <p>The <code class="inl">cmlLink</code> S3 SigV4 URL carries <code class="inl">X-Amz-Expires=120</code>, but CloudFront's cache key is <b>path-only</b> (ignores the signed query string). Once any valid link warms the edge cache, the same S3 path is served for the CloudFront TTL regardless of signature validity, and repeat fetches succeed. <code class="inl">X-Amz-Expires=120</code> only bounds a cold cache-miss at the S3 origin.</p>
+            <div class="mit"><b>Mitigation:</b> don't treat 120s/single-use as a boundary; fetch server-side and never surface the link.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 06 GAPS -->
+    <section class="block prose" id="gaps">
+      <div class="kicker"><span class="idx">06</span> Open items</div>
+      <h2>Gaps &amp; confirmations still owed</h2>
+      <div class="gotchas" style="margin-top:18px"><ul>
+        <li><b>Ledger email branch</b> — <code class="inl">GetLedgerDetailsPDF</code> <code class="inl">RequestFor:1</code> not fired (consent: no email branches). Presumed to mirror P&amp;L. <span class="flag">CONFIRM</span></li>
+        <li><b>MTF ledger</b> — <code class="inl">Margin:1</code> was byte-identical to <code class="inl">Margin:0</code> on the no-MTF test account; the discriminator is unverified. Needs an account with real MTF holdings. <span class="flag">CONFIRM</span></li>
+        <li><b>CML source-gating</b> — whether the MIS backend actually enforces <code class="inl">source: FINX_ANDROID</code> is unconfirmed. <span class="flag">CONFIRM</span></li>
+        <li><b>Tax email response</b> — confirmation shape presumed from P&amp;L, not separately captured for Tax.</li>
+        <li><b>SessionId lifecycle</b> — acquisition / lifetime / refresh undocumented; the widget receives it from the app handoff. <span class="flag gap">GAP</span></li>
+      </ul></div>
+      <p style="margin-top:22px"><b>Not in the Android capture set</b> (documented elsewhere, listed to avoid confusion): <code class="inl">get-profile</code> (<code class="inl">mf.choiceindia.com</code>, the greeting), Brokerage slab, Holdings (<code class="inl">finxomne</code> COTI), and the data-only endpoints <code class="inl">GetGlobalPNLNew</code> / <code class="inl">GetLedgerDetails</code> / <code class="inl">GetDetailedPNL</code>.</p>
+    </section>
+
+    <footer>
+      <span>FinX Android Report APIs — Field Reference</span>
+      <span class="src">source · finx_api_captures_2026-07-16.md · technical/03_finx_api_reference.md · app/finx/models.py</span>
+    </footer>
+  </main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ---------- syntax highlighting (safe, single-pass) ---------- */
+  function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+  // Note: source already contains &lt; / &gt; / &amp; entities; textContent decodes them,
+  // so esc() re-encodes exactly once. No double-encoding.
+  function hlJson(line){
+    var re = /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|(-?\d+\.?\d*)/g;
+    return line.replace(re, function(m, str, colon, lit, num){
+      if (str !== undefined){
+        return colon ? '<span class="t-key">'+str+'</span>'+colon
+                     : '<span class="t-str">'+str+'</span>';
+      }
+      if (lit !== undefined) return '<span class="t-lit">'+lit+'</span>';
+      if (num !== undefined) return '<span class="t-num">'+num+'</span>';
+      return m;
+    });
+  }
+  function hlLineComment(line, hl){
+    // split a trailing " # ..." or "// ..." comment off, highlight the rest with hl()
+    var idx = -1, i;
+    for (i = 0; i < line.length - 1; i++){
+      if (line[i] === "#" || (line[i] === "/" && line[i+1] === "/")){
+        if (i === 0 || line[i-1] === " "){ idx = i; break; }
+      }
+    }
+    if (idx === -1) return hl(line);
+    return hl(line.slice(0, idx)) + '<span class="t-com">' + line.slice(idx) + '</span>';
+  }
+  function hlHttp(line){
+    var m = line.match(/^([A-Za-z0-9-]+)(:)(.*)$/);
+    if (m) return '<span class="t-key">'+m[1]+'</span>'+m[2]+'<span class="t-str">'+m[3]+'</span>';
+    return line;
+  }
+  function highlight(code){
+    try {
+      var lang = code.getAttribute("data-lang") || (code.parentNode && code.parentNode.getAttribute("data-lang")) || "";
+      var raw = code.textContent;
+      var lines = esc(raw).split("\n");
+      var out = lines.map(function(line){
+        if (lang === "http")  return hlLineComment(line, hlHttp);
+        if (lang === "kotlin"){
+          return line.replace(/\b(enum class|val|Int)\b/g,'<span class="t-lit">$1</span>')
+                     .replace(/\b(\d+)\b/g,'<span class="t-num">$1</span>');
+        }
+        return hlLineComment(line, hlJson); // json (and python-ish)
+      });
+      code.innerHTML = out.join("\n");
+    } catch (e) { /* leave plain text */ }
+  }
+  document.querySelectorAll("pre code").forEach(highlight);
+
+  /* ---------- copy buttons ---------- */
+  document.querySelectorAll(".code").forEach(function(box){
+    var btn = box.querySelector(".copy");
+    var pre = box.querySelector("pre code") || box.querySelector("pre");
+    if (!btn || !pre) return;
+    btn.addEventListener("click", function(){
+      var text = pre.textContent;
+      var done = function(){ btn.textContent = "copied"; btn.classList.add("done");
+        setTimeout(function(){ btn.textContent = "copy"; btn.classList.remove("done"); }, 1400); };
+      if (navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(text).then(done, function(){});
+      } else {
+        try { var ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta);
+          ta.select(); document.execCommand("copy"); document.body.removeChild(ta); done(); } catch(e){}
+      }
+    });
+  });
+
+  /* ---------- response tabs ---------- */
+  document.querySelectorAll("[data-tabs]").forEach(function(group){
+    var tabs = Array.prototype.slice.call(group.querySelectorAll(".tab"));
+    tabs.forEach(function(tab, i){
+      tab.addEventListener("click", function(){ activate(tab); });
+      tab.addEventListener("keydown", function(e){
+        var n = null;
+        if (e.key === "ArrowRight") n = tabs[(i+1)%tabs.length];
+        if (e.key === "ArrowLeft")  n = tabs[(i-1+tabs.length)%tabs.length];
+        if (n){ e.preventDefault(); n.focus(); activate(n); }
+      });
+    });
+    function activate(tab){
+      tabs.forEach(function(t){
+        var sel = t === tab;
+        t.setAttribute("aria-selected", sel ? "true" : "false");
+        var pane = group.querySelector("#" + t.getAttribute("data-pane"));
+        if (pane) pane.setAttribute("data-open", sel ? "true" : "false");
+      });
+    }
+  });
+
+  /* ---------- scroll-spy nav + progress ---------- */
+  var links = Array.prototype.slice.call(document.querySelectorAll("#nav a.nav"));
+  var byId = {};
+  links.forEach(function(a){ byId[a.getAttribute("href").slice(1)] = a; });
+  var targets = links.map(function(a){ return document.getElementById(a.getAttribute("href").slice(1)); }).filter(Boolean);
+
+  var progress = document.getElementById("progress");
+  function onScroll(){
+    var h = document.documentElement;
+    var max = h.scrollHeight - h.clientHeight;
+    progress.style.width = (max > 0 ? (h.scrollTop / max) * 100 : 0) + "%";
+  }
+  window.addEventListener("scroll", onScroll, { passive: true });
+  onScroll();
+
+  if ("IntersectionObserver" in window){
+    var current = null;
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(en){
+        if (en.isIntersecting){
+          var a = byId[en.target.id];
+          if (a && a !== current){
+            links.forEach(function(l){ l.classList.remove("is-active"); });
+            a.classList.add("is-active");
+            current = a;
+            if (a.scrollIntoView) {
+              var rail = a.closest(".rail__inner");
+              if (rail){ var r = a.getBoundingClientRect(), rr = rail.getBoundingClientRect();
+                if (r.top < rr.top || r.bottom > rr.bottom) a.scrollIntoView({ block: "nearest" }); }
+            }
+          }
+        }
+      });
+    }, { rootMargin: "-45% 0px -50% 0px", threshold: 0 });
+    targets.forEach(function(t){ io.observe(t); });
+  }
+})();
+</script>

@@ -1,0 +1,25 @@
+# Environment / secrets — never commit real tokens
+.env*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.egg-info/
+
+# Node
+node_modules/
+
+# Build output
+dist/
+
+# Playwright artifacts
+playwright-report/
+test-results/
+playwright/.cache/
+.gstack/
+
+# Local editor/agent settings
+.claude/settings.local.json

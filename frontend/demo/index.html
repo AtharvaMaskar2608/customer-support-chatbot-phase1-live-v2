@@ -1,0 +1,133 @@
+<!doctype html>
+<!--
+  Demo host page simulating the FinX website (widget-launcher capability).
+
+  DEV-ONLY QA page, served by the Vite dev server:
+
+    http://localhost:5173/demo/index.html
+      ?userId=X008593&sessionId=s1&accessToken=t1&isDarkTheme=true
+
+  It reads its OWN query string (userId, sessionId, accessToken, isDarkTheme,
+  obStatus, screenName — all optional, with mock defaults) and forwards the
+  values into ChoiceJini.init, exactly like the real FinX site would.
+
+  In dev the widget is loaded straight from its TS source
+  (/src/widget/widget.ts — the dev server transpiles it on the fly). A real
+  host page instead loads the built artifact: <script src="/widget.js">.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FinX (demo host) — Choice Jini widget</title>
+    <script>
+      // Host page theme, applied before paint (mirrors the real FinX site).
+      if (
+        (new URLSearchParams(location.search).get('isDarkTheme') || '').toLowerCase() === 'true'
+      ) {
+        document.documentElement.dataset.theme = 'dark'
+      }
+    </script>
+    <style>
+      :root {
+        --bg: #f6f6f8;
+        --surface: #ffffff;
+        --border: #e7e7ec;
+        --text: #18181b;
+        --muted: #71717a;
+        --accent: #7c3aed;
+        --green: #16a34a;
+      }
+      :root[data-theme='dark'] {
+        --bg: #0b0b0f;
+        --surface: #17171c;
+        --border: #2a2a33;
+        --text: #fafafa;
+        --muted: #a1a1aa;
+        --accent: #a78bfa;
+        --green: #4ade80;
+        color-scheme: dark;
+      }
+      * { box-sizing: border-box; margin: 0; }
+      body {
+        font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 28px;
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+      }
+      .logo { font-size: 20px; font-weight: 800; letter-spacing: -0.5px; }
+      .logo span { color: var(--accent); }
+      nav { display: flex; gap: 22px; font-size: 14px; color: var(--muted); }
+      main { max-width: 960px; margin: 0 auto; padding: 36px 24px 120px; }
+      h1 { font-size: 26px; letter-spacing: -0.5px; }
+      .sub { margin-top: 6px; color: var(--muted); font-size: 14px; }
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 16px;
+        margin-top: 28px;
+      }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 18px;
+      }
+      .card .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+      .card .value { margin-top: 8px; font-size: 24px; font-weight: 700; }
+      .card .delta { margin-top: 4px; font-size: 13px; color: var(--green); }
+      .rows { margin-top: 32px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; }
+      .row {
+        display: flex;
+        justify-content: space-between;
+        padding: 14px 18px;
+        font-size: 14px;
+        border-bottom: 1px solid var(--border);
+      }
+      .row:last-child { border-bottom: none; }
+      .row .muted { color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="logo">Fin<span>X</span></div>
+      <nav><span>Portfolio</span><span>Orders</span><span>Funds</span><span>Reports</span></nav>
+    </header>
+    <main>
+      <h1>Good morning, investor</h1>
+      <p class="sub">Demo host content — the Choice Jini bubble floats bottom-right.</p>
+      <div class="cards">
+        <div class="card"><div class="label">Portfolio value</div><div class="value">₹12,48,930</div><div class="delta">+1.8% today</div></div>
+        <div class="card"><div class="label">Day P&amp;L</div><div class="value">₹22,140</div><div class="delta">+0.4%</div></div>
+        <div class="card"><div class="label">Available margin</div><div class="value">₹3,10,552</div><div class="delta">updated now</div></div>
+      </div>
+      <div class="rows">
+        <div class="row"><span>RELIANCE</span><span class="muted">120 qty</span><span>₹2,986.40</span></div>
+        <div class="row"><span>HDFCBANK</span><span class="muted">85 qty</span><span>₹1,644.15</span></div>
+        <div class="row"><span>TCS</span><span class="muted">40 qty</span><span>₹4,102.70</span></div>
+        <div class="row"><span>INFY</span><span class="muted">150 qty</span><span>₹1,829.55</span></div>
+      </div>
+    </main>
+
+    <!-- Dev: widget straight from source (Vite transpiles). Real hosts: /widget.js -->
+    <script type="module" src="/src/widget/widget.ts"></script>
+    <script type="module">
+      const p = new URLSearchParams(location.search)
+      window.ChoiceJini.init({
+        userId: p.get('userId') ?? 'X008593',
+        sessionId: p.get('sessionId') ?? 'demo-session-001',
+        accessToken: p.get('accessToken') ?? 'demo.jwt.token',
+        isDarkTheme: (p.get('isDarkTheme') ?? '').toLowerCase() === 'true',
+        obStatus: p.get('obStatus') ?? 'complete',
+        screenName: p.get('screenName') ?? 'demo-host',
+      })
+    </script>
+  </body>
+</html>

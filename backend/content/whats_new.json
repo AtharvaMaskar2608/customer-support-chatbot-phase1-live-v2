@@ -1,0 +1,17 @@
+{
+  "version": "2026-07-18.1",
+  "items": [
+    {
+      "emoji": "📄",
+      "tint": "indigo",
+      "title": "Capital Gain report in Excel",
+      "description": "Ask for FY 25-26 — delivered in-chat, tax-filing ready."
+    },
+    {
+      "emoji": "🎫",
+      "tint": "green",
+      "title": "Live ticket status",
+      "description": "Type a ticket number to get its current stage, instantly."
+    }
+  ]
+}
