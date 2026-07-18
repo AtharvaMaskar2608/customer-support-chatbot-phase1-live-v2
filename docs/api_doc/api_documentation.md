@@ -199,3 +199,93 @@ routing, error mapping, and the delivery/PII layer.
 
 > No real tokens, client codes, emails, or report URLs appear in this repo. All
 > examples above use placeholders.
+
+---
+
+## 3. Ledger Report — `GetLedgerDetailsPDF`
+
+**Status:** verified live 2026-07-18 (real PDF). Mirrors P&L; PDF only, no format.
+
+| Item   | Value |
+|--------|-------|
+| Method / URL | `POST /api/middleware/GetLedgerDetailsPDF` (finx.choiceindia.com) |
+| Auth   | `authorization: <SessionId>` (raw, no prefix) · `from: <build tag>` |
+| Delivery | download / email (PDF). Delivered PDF is **PAN-password-protected**. |
+
+### Upstream request body — fields we send (`LedgerPdfRequest`)
+
+| Field | Notes |
+|-------|-------|
+| `ClientId` / `LoginId` | both = session client code (from `X-User-Id`, never body) |
+| `Group` | fixed `"GROUP1"` (uppercase) |
+| `Margin` | `0` = Normal · `1` = MTF *(MTF discriminator CONFIRM-pending)* |
+| `FromDate` / `ToDate` | `YYYY-MM-DD` |
+| `RequestFor` | **0 = download · 1 = email** (hardcoded per endpoint) |
+| `SessionId` | matches the header |
+
+### Our proxy contract
+
+`POST /api/report/ledger` — headers `Authorization` / `X-Session-Id` / `X-User-Id`;
+body `{"book":"Normal"|"MTF","fromDate","toDate","delivery":"download"|"email"}`.
+Response identical to P&L (`{delivery, file, fileToken}` / `{delivery:"email", emailMasked}`;
+401 `AUTH_EXPIRED` / 404 `NO_DATA` / 502 `UPSTREAM_ERROR`). Same `GET /api/report/file/{token}`.
+
+---
+
+## 4. Capital Gains / Tax Report — `GetTaxReportPDF`
+
+**Status:** verified live 2026-07-18 (real PDF + Excel). The **only** endpoint with a format choice.
+
+| Item   | Value |
+|--------|-------|
+| Method / URL | `POST /api/middleware/GetTaxReportPDF` (finx.choiceindia.com) |
+| Auth   | `authorization: <SessionId>` · `from: <build tag>` |
+| Delivery | download / email · **PDF or Excel** |
+
+### Upstream request body — fields we send (`TaxReportRequest`)
+
+| Field | Notes |
+|-------|-------|
+| `ClientId` | session client code (never body) |
+| `FinYear` | `"YYYY-YYYY"` — **dynamic** window (current + last 2 FYs; never hardcode) |
+| `RequestFor` | **2 = download · 1 = email** — the download value forks (2 here, not 0) |
+| `FileFormat` | `1` = PDF · `2` = Excel |
+| `SessionId` | matches the header |
+
+Excel URL carries a `_<epoch>.xlsx` suffix; we name/label the file by `FileFormat`.
+"No data" `Reason` is `"Data not available."` — branch on `Status`, never string-match.
+
+### Our proxy contract
+
+`POST /api/report/tax` — body `{"finYear","format":"PDF"|"Excel","delivery"}`. Response as P&L;
+`file.format` and filename extension (`.pdf`/`.xlsx`) set from the chosen format.
+
+---
+
+## 5. Contract Notes — `/report/contract` + `/contract/download`
+
+**Status:** verified live 2026-07-18 (list + real PDF). Two-step; **download only** (no email).
+
+| Item   | Value |
+|--------|-------|
+| List   | `POST /middleware-go/report/contract` (finx.choiceindia.com) · `authorization: <SessionId>` |
+| Download | `POST /middleware-go/contract/download` (api.choiceindia.com) · `authorization: Session <SessionId>` (note the `Session ` prefix) · returns raw PDF bytes |
+| Delivery | download only · PDFs are **NOT** password-protected |
+
+### Fields we consume (`ContractNote`)
+
+| Field | Notes |
+|-------|-------|
+| `date` | `DDMMYYYY` (trade date) → displayed `D Mon YYYY` |
+| `file_id` | ~88-char download handle — **sensitive, server-side only, never surfaced** |
+| `group` | segment hint (only `Grp1`=Equity confirmed live) |
+| `invoice_number` | contract-note number |
+
+List no-data = HTTP **204** (`{notes: []}` to the client). The chain authorizes on body
+`client_id` only (**IDOR**) — we bind every call to the authenticated session and never
+accept a client code from input.
+
+### Our proxy contract
+
+- `POST /api/report/contract-notes/list` — body `{"fromDate","toDate"}` → `{"notes":[{id,date,segment,badge,month}]}`. `id` is an **opaque per-session token** mapped to `file_id` server-side; `file_id` never leaves the backend.
+- `POST /api/report/contract-notes/download` — body `{"id"}` → `{delivery:"download", file, fileToken}` (`passwordProtected:false`). Same `GET /api/report/file/{token}`.
