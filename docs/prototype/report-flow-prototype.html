@@ -147,6 +147,85 @@
   .rise{animation:rise .32s cubic-bezier(.22,1,.36,1)}
   @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
   .note{font-size:11px;color:var(--ink-faint);text-align:center;max-width:400px;line-height:1.55}
+
+  /* ── holdings data-card (data lives IN the chat, not a download) ── */
+  .hcard{gap:0;padding:0;overflow:hidden}
+  .hhero{padding:15px 16px 14px}
+  .hlabel{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-faint)}
+  .hval{font-size:31px;font-weight:800;letter-spacing:-.02em;margin:3px 0 1px;font-variant-numeric:tabular-nums;line-height:1.05}
+  .hinv{font-size:12px;color:var(--ink-faint);margin-bottom:12px}
+  .hstats{display:flex;gap:8px;flex-wrap:wrap}
+  .hstat{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;padding:7px 11px;border-radius:10px;background:var(--track);color:var(--ink-soft);font-variant-numeric:tabular-nums}
+  .hstat .lab{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;opacity:.72}
+  .hstat.up{background:color-mix(in srgb,var(--online) 13%,transparent);color:var(--online)}
+  .hstat.down{background:color-mix(in srgb,var(--alert) 13%,transparent);color:var(--alert)}
+  .hfresh{font-size:11px;color:var(--ink-faint);margin-top:10px;display:flex;align-items:center;gap:6px}
+  .hfresh .fdot{width:7px;height:7px;border-radius:50%;background:var(--ink-faint);opacity:.55;flex-shrink:0}
+  .halloc{display:flex;height:9px;margin:1px 16px 0;border-radius:999px;overflow:hidden;gap:2px;background:var(--track)}
+  .halloc .seg{height:100%;border-radius:2px;flex:none;transition:width .62s cubic-bezier(.22,1,.36,1)}
+  .hleg{font-size:11px;color:var(--ink-faint);margin:8px 16px 3px;line-height:1.5}
+  .hleg b{color:var(--ink-soft);font-weight:700}
+  .hlist{margin-top:5px}
+  .hitem{border-top:1px solid var(--line)}
+  .hrow{display:flex;align-items:center;justify-content:space-between;padding:11px 16px;cursor:pointer;gap:10px}
+  .hrow:hover{background:var(--track)}
+  .hsym{font-size:13.5px;font-weight:700;display:flex;align-items:center;gap:7px}
+  .hdot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+  .hqty{font-size:11.5px;color:var(--ink-faint);margin-top:2px;padding-left:15px}
+  .hrr{text-align:right;flex-shrink:0}
+  .hcur{font-size:13.5px;font-weight:700;font-variant-numeric:tabular-nums}
+  .hpnl{font-size:11.5px;font-weight:700;margin-top:2px}
+  .hpnl.up{color:var(--online)} .hpnl.down{color:var(--alert)}
+  .hdetail{display:none;grid-template-columns:1fr 1fr;gap:9px 14px;padding:3px 16px 13px;background:var(--track)}
+  .hdetail.open{display:grid}
+  .hdt .k{color:var(--ink-faint);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em}
+  .hdt .v{font-weight:700;font-size:12.5px;font-variant-numeric:tabular-nums;margin-top:1px}
+  .hdt.wide{grid-column:1/-1}
+  .hdt.wide .v{font-weight:500;line-height:1.45}
+  .hmore{text-align:center;padding:11px;font-size:13px;font-weight:600;color:var(--accent);cursor:pointer;border-top:1px solid var(--line)}
+  .hmore:hover{background:var(--accent-tint)}
+  .hfoot{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-top:1px solid var(--line)}
+  .hfoot .asof{font-size:11px;color:var(--ink-faint)}
+  .hfoot .dlbtn{font:inherit;font-size:12px;font-weight:600;color:var(--accent);background:none;border:0;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+  .hfoot .dlbtn:hover{text-decoration:underline}
+  .hfoot .dlbtn.ok{color:var(--online);text-decoration:none;cursor:default}
+
+  /* ── money in & out — one timeline; success is quiet, exceptions carry the color ── */
+  .mcard{gap:0;padding:0;overflow:hidden}
+  .mhead{padding:13px 16px 12px;border-bottom:1px solid var(--line)}
+  .mchips{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+  .mchip{font:inherit;font-size:11.5px;font-weight:700;padding:5px 11px;border-radius:999px;border:1.5px solid var(--line-strong);background:var(--card);color:var(--ink-soft);cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+  .mchip .cdot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+  .mchip.on{border-color:var(--ink-soft);background:var(--track);color:var(--ink)}
+  .mrow{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 16px;cursor:pointer}
+  .mrow:hover{background:var(--track)}
+  .mamt{font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:7px}
+  .mdir{font-weight:800;font-size:12px}
+  .mdir.in{color:var(--online)}
+  .mdir.out{color:var(--ink-soft)}
+  .mmeta{font-size:11.5px;color:var(--ink-faint);margin-top:2px}
+  .mst{font-size:11.5px;font-weight:700;flex-shrink:0}
+  .mst.ok{color:var(--online)}
+  .mst.pend{color:#d97706}
+  .mst.fail{color:var(--alert)}
+  .mst.cxl{color:var(--ink-faint)}
+  .hitem.dim .mrow{opacity:.68}
+  .mfoot{padding:10px 16px;border-top:1px solid var(--line);font-size:11px;color:var(--ink-faint);line-height:1.5}
+  .mmore{text-align:center;padding:11px;font-size:13px;font-weight:600;color:var(--accent);cursor:pointer;border-top:1px solid var(--line)}
+  .mmore:hover{background:var(--accent-tint)}
+  .mempty{padding:18px 16px;text-align:center;color:var(--ink-faint);font-size:13px}
+
+  /* ── brokerage rate-card (a pricing reference, not charges billed) ── */
+  .bcard{gap:0;padding:0;overflow:hidden}
+  .bhead{padding:14px 16px 11px}
+  .bsub{font-size:12px;color:var(--ink-faint);margin-top:2px}
+  .brow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border-top:1px solid var(--line)}
+  .brow .bt{font-size:13.5px;font-weight:700}
+  .bcov{font-size:11px;color:var(--ink-faint);margin-top:3px}
+  .brr{text-align:right;flex-shrink:0}
+  .bval{font-size:15px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+  .bunit{font-size:11px;color:var(--ink-faint);margin-top:2px;font-variant-numeric:tabular-nums}
+  .bnote{font-size:11px;color:var(--ink-faint);padding:11px 16px;border-top:1px solid var(--line);line-height:1.5}
 </style>
 </head>
 <body>
@@ -191,6 +270,9 @@ const P={
   ticket:'<path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2z"/><path d="M13 5v14"/>',
   send:'<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/>',
   check:'<path d="M20 6 9 17l-5-5"/>',
+  pie:'<path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/>',
+  swap:'<path d="M7 5v14"/><path d="M4 16l3 3 3-3"/><path d="M17 19V5"/><path d="M14 8l3-3 3 3"/>',
+  tag:'<path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><path d="M7 7h.01"/>',
 };
 function ic(name,size){size=size||16;return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;flex-shrink:0">${P[name]}</svg>`;}
 function downloadFeedback(btn){
@@ -214,10 +296,13 @@ function narrate(steps,done){
 
 /* ── empty state ── */
 const STICKERS=[
+  {ic:'pie',     label:'My holdings',    c:'#0891b2', e:'#0e7490', go:()=>startHolding()},
   {ic:'chart',   label:'Get my P&L',     c:'#7c3aed', e:'#5b21b6', go:()=>startReport(PNL)},
   {ic:'book',    label:'Show my ledger', c:'#2563eb', e:'#1e40af', go:()=>startReport(LEDGER)},
   {ic:'receipt', label:'Capital gains',  c:'#d97706', e:'#b45309', go:()=>startReport(TAX)},
   {ic:'file',    label:'Contract notes', c:'#0d9488', e:'#0f766e', go:()=>startCn()},
+  {ic:'swap',    label:'Pay in / out',   c:'#059669', e:'#047857', go:()=>startPayin()},
+  {ic:'tag',     label:'Brokerage',      c:'#e11d48', e:'#be123c', go:()=>startBrokerage()},
 ];
 function stickerRow(){
   const row=el(`<div class="stickers"></div>`);
@@ -245,11 +330,14 @@ document.getElementById('cs').innerHTML=ic('send',16);
 function onSend(){
   const inp=document.getElementById('ci'); const t=inp.value.trim(); if(!t)return; inp.value='';
   engage(); userSay(t); const low=t.toLowerCase();
-  if(/p ?& ?l|pnl|profit|p and l/.test(low)) botThen(()=>flowReport(PNL));
+  if(/holding|portfolio|my stocks|my shares|invest/.test(low)) botThen(()=>flowHolding());
+  else if(/pay ?in|pay ?out|payin|payout|deposit|withdraw|add(ed)? money|my funds/.test(low)) botThen(()=>flowPayin());
+  else if(/brokerage|my charges|my fees|rate card|slab/.test(low)) botThen(()=>flowBrokerage());
+  else if(/p ?& ?l|pnl|profit|p and l/.test(low)) botThen(()=>flowReport(PNL));
   else if(/ledger/.test(low)) botThen(()=>flowReport(LEDGER));
   else if(/capital|tax|gain/.test(low)) botThen(()=>flowReport(TAX));
   else if(/contract/.test(low)) botThen(()=>flowCn());
-  else botThen(()=>{ add(el(`<div class="bot-line">I can pull your P&L, ledger, capital gains and contract notes right now — tap one:</div>`)); add(stickerRow()); });
+  else botThen(()=>{ add(el(`<div class="bot-line">I can show your holdings, money in/out and brokerage, or pull your P&L, ledger, capital gains and contract notes — tap one:</div>`)); add(stickerRow()); });
 }
 document.getElementById('cs').onclick=onSend;
 document.getElementById('ci').addEventListener('keydown',e=>{if(e.key==='Enter')onSend();});
@@ -438,10 +526,258 @@ function cnRowGet(n){
   add(el(`<div class="card"><div class="file"><div class="icon">PDF</div><div class="meta"><div class="fname">Contract_Note_${n.file}.pdf</div><div class="fsub">96 KB · PDF</div></div><div class="acts"><button class="iconbtn dl" title="Download">${ic('download')}</button></div></div></div>`));
 }
 
+/* ── holdings: a data-card (the answer lives in the chat, no download) ──
+   Raw shape mirrors FinX /COTI/V1/Holdings: prices in PAISE (ltp/cp), avg-buy in RUPEES (abp). */
+const HRAW=[
+  {sym:'GOLDBEES-EQ', name:'NIP IND ETF GOLD BEES',    q:88,  ltp:11579,  cp:11647,  abp:64.09},
+  {sym:'ITCHOTELS-EQ',name:'ITC HOTELS LIMITED',       q:2,   ltp:17241,  cp:17412,  abp:257.54},
+  {sym:'DAVANGERE-EQ',name:'DAVANGERE SUGAR COMPANY L',q:13,  ltp:349,    cp:351,    abp:3.66},
+  {sym:'NIFTYBEES-EQ',name:'NIP IND ETF NIFTY BEES',   q:215, ltp:27646,  cp:27399,  abp:177.00},
+  {sym:'RELIANCE-EQ', name:'RELIANCE INDUSTRIES LTD',  q:18,  ltp:132720, cp:129660, abp:1297.38},
+  {sym:'ITC-EQ',      name:'ITC LTD',                  q:20,  ltp:28070,  cp:27935,  abp:164.88},
+  {sym:'BANKBARODA-EQ',name:'BANK OF BARODA',          q:501, ltp:24680,  cp:24830,  abp:125.00},
+  {sym:'IDEA-EQ',     name:'VODAFONE IDEA LIMITED',    q:7,   ltp:1374,   cp:1389,   abp:14.93},
+  {sym:'HDBFS-EQ',    name:'HDB FINANCIAL SERVICES L', q:20,  ltp:73250,  cp:75225,  abp:740.00},
+  {sym:'CHOICEGOLD-EQ',name:'CHOICEAMC - CHOICEGOLD',  q:38,  ltp:13931,  cp:14000,  abp:119.94},
+];
+const HCOL=['#7c3aed','#2563eb','#0d9488','#d97706','#db2777'];
+function moneyAbs(n){ const tp=Math.round(Math.abs(n)*100), rup=Math.floor(tp/100), p=tp%100; let s=String(rup); if(s.length>3){const l=s.slice(-3); const r=s.slice(0,-3).replace(/\B(?=(\d{2})+(?!\d))/g,','); s=r+','+l;} return '₹'+s+(p?'.'+String(p).padStart(2,'0'):''); }
+function deriveHoldings(){
+  const rows=HRAW.map(h=>{ const ltp=h.ltp/100, cp=h.cp/100, cur=h.q*ltp, inv=h.q*h.abp;
+    return {sym:h.sym.replace(/-EQ$/,''), name:h.name, q:h.q, abp:h.abp, ltp, cur, inv,
+      pnl:cur-inv, pnlPct:inv?(cur-inv)/inv*100:0, day:h.q*(ltp-cp), dayPct:cp?(ltp-cp)/cp*100:0};
+  }).sort((a,b)=>b.cur-a.cur);
+  const totCur=rows.reduce((s,r)=>s+r.cur,0), totInv=rows.reduce((s,r)=>s+r.inv,0), totDay=rows.reduce((s,r)=>s+r.day,0);
+  rows.forEach((r,i)=>{ r.alloc=r.cur/totCur*100; r._col=i<5?HCOL[i]:'#a1a1aa'; });
+  return {rows,totCur,totInv,totPnl:totCur-totInv,totPnlPct:(totCur-totInv)/totInv*100,totDay,totDayPct:totDay/(totCur-totDay)*100};
+}
+/* Holding Overall Report CSV — mirrors the app export: raw API order, rupees, filename {UserCode}_Holding_Overall_Report_{stamp}.csv */
+function csvNum(n){ return String(Math.round(n*100)/100); }
+function stamp(){ const d=new Date(), p=(n,l=2)=>String(n).padStart(l,'0');
+  return d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+p(d.getHours())+p(d.getMinutes())+p(d.getSeconds())+p(d.getMilliseconds(),3); }
+function downloadHoldingsCsv(){
+  const head=['Instrument','Exchange','QTY | LOT','Avg. Price','LTP','Invested Amt.','Current Value','Returns','Returns %','Product'];
+  const lines=[head.join(',')];
+  HRAW.forEach(h=>{ const ltp=h.ltp/100, cur=h.q*ltp, inv=h.q*h.abp, ret=cur-inv;
+    lines.push([h.sym,'NSE',h.q,csvNum(h.abp),csvNum(ltp),csvNum(inv),csvNum(cur),csvNum(ret),csvNum(inv?ret/inv*100:0),'DELIVERY'].join(',')); });
+  const fn=`X008593_Holding_Overall_Report_${stamp()}.csv`;
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([lines.join('\r\n')],{type:'text/csv'}));
+  a.download=fn; a.click(); URL.revokeObjectURL(a.href); return fn;
+}
+function startHolding(){ engage(); userSay('Show my holdings'); botThen(()=>flowHolding()); }
+function flowHolding(){
+  add(el(`<div class="bot-line">Sure — here's your portfolio at the last fetched prices.</div>`));
+  narrate(['Fetching your holdings…','Valuing at last prices…'], ()=>renderHoldingCard());
+}
+function countUp(node,target){ const dur=680,t0=performance.now();
+  (function step(t){ const p=Math.min(1,(t-t0)/dur), e=1-Math.pow(1-p,3); node.textContent=moneyAbs(Math.round(target*e)); if(p<1)requestAnimationFrame(step); })(t0);
+}
+function holdRow(r){
+  const item=el(`<div class="hitem"></div>`);
+  const row=el(`<div class="hrow"><div><div class="hsym"><span class="hdot" style="background:${r._col}"></span>${r.sym}</div><div class="hqty">${r.q} qty · avg ₹${r.abp.toFixed(2)}</div></div>`
+    +`<div class="hrr"><div class="hcur">${moneyAbs(r.cur)}</div><div class="hpnl ${r.pnl>=0?'up':'down'}">${r.pnl>=0?'+':'−'}${Math.abs(r.pnlPct).toFixed(1)}%</div></div></div>`);
+  const gc=r.day>=0?'var(--online)':'var(--alert)', pc=r.pnl>=0?'var(--online)':'var(--alert)';
+  const det=el(`<div class="hdetail">`
+    +`<div class="hdt"><div class="k">Invested</div><div class="v">${moneyAbs(r.inv)}</div></div>`
+    +`<div class="hdt"><div class="k">Current</div><div class="v">${moneyAbs(r.cur)}</div></div>`
+    +`<div class="hdt"><div class="k">Last price</div><div class="v">₹${r.ltp.toFixed(2)}</div></div>`
+    +`<div class="hdt"><div class="k">1D change</div><div class="v" style="color:${gc}">${r.day>=0?'▴':'▾'} ${moneyAbs(r.day)} · ${Math.abs(r.dayPct).toFixed(2)}%</div></div>`
+    +`<div class="hdt"><div class="k">Overall P&L</div><div class="v" style="color:${pc}">${r.pnl>=0?'+':'−'}${moneyAbs(r.pnl)}</div></div>`
+    +`<div class="hdt"><div class="k">Allocation</div><div class="v">${r.alloc.toFixed(1)}%</div></div></div>`);
+  row.onclick=()=>det.classList.toggle('open');
+  item.appendChild(row); item.appendChild(det); return item;
+}
+function renderHoldingCard(){
+  const d=deriveHoldings();
+  const card=add(el(`<div class="card hcard"></div>`));
+  /* real build: freshness stamp = max(LUT) across scrips from the API, never a hardcode */
+  const hero=el(`<div class="hhero"><div class="hlabel">Portfolio value · ${d.rows.length} holdings</div>`
+    +`<div class="hval">₹0</div><div class="hinv">Invested ${moneyAbs(d.totInv)}</div>`
+    +`<div class="hstats">`
+    +`<div class="hstat ${d.totDay>=0?'up':'down'}"><span class="lab">1D</span> ${d.totDay>=0?'▴':'▾'} ${moneyAbs(d.totDay)} · ${Math.abs(d.totDayPct).toFixed(2)}%</div>`
+    +`<div class="hstat ${d.totPnl>=0?'up':'down'}"><span class="lab">Overall</span> ${d.totPnl>=0?'▴':'▾'} ${moneyAbs(d.totPnl)} · ${Math.abs(d.totPnlPct).toFixed(1)}%</div>`
+    +`</div><div class="hfresh"><span class="fdot"></span>Prices as of 17 Jul, 3:59 pm — last fetch, not live</div></div>`);
+  card.appendChild(hero);
+  const bar=el(`<div class="halloc"></div>`);
+  /* top 5 get a segment each; the tail lumps into one gray "Other" — sub-1px slivers aren't data */
+  const segs=d.rows.slice(0,5).map(r=>({label:r.sym,alloc:r.alloc,col:r._col}));
+  const rest=d.rows.slice(5);
+  if(rest.length) segs.push({label:`Other (${rest.length})`,alloc:rest.reduce((s,r)=>s+r.alloc,0),col:'var(--line-strong)'});
+  segs.forEach(s=>{ const seg=el(`<div class="seg" style="width:0;background:${s.col}"></div>`); seg.title=`${s.label} · ${s.alloc.toFixed(1)}%`; bar.appendChild(seg);
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{seg.style.width=s.alloc+'%';})); });
+  card.appendChild(bar);
+  card.appendChild(el(`<div class="hleg"><b>${d.rows[0].sym}</b> ${d.rows[0].alloc.toFixed(0)}% · <b>${d.rows[1].sym}</b> ${d.rows[1].alloc.toFixed(0)}% · +${d.rows.length-2} more</div>`));
+  const list=el(`<div class="hlist"></div>`); card.appendChild(list);
+  let shown=0; const addRows=lim=>{ while(shown<Math.min(lim,d.rows.length)){ list.appendChild(holdRow(d.rows[shown])); shown++; } };
+  addRows(4);
+  if(d.rows.length-shown>0){ const m=el(`<div class="hmore">Show all ${d.rows.length} holdings</div>`); m.onclick=()=>{m.remove();addRows(d.rows.length);}; card.appendChild(m); }
+  const foot=el(`<div class="hfoot"><span class="asof">Ask again anytime — prices refetch on every request</span><button class="dlbtn">${ic('download',14)} Download CSV</button></div>`);
+  foot.querySelector('.dlbtn').onclick=e=>{ const b=e.currentTarget; if(b.dataset.busy)return; b.dataset.busy='1';
+    downloadHoldingsCsv(); b.innerHTML=`<span class="spin"></span> Saving…`;
+    setTimeout(()=>{ b.classList.add('ok'); b.innerHTML=`${ic('check',14)} Saved to downloads`;
+      setTimeout(()=>{ b.classList.remove('ok'); b.innerHTML=`${ic('download',14)} Download CSV`; delete b.dataset.busy; },1700);
+    },520);
+  };
+  card.appendChild(foot);
+  countUp(hero.querySelector('.hval'), Math.round(d.totCur));
+  add(el(`<div class="followup">Tap any holding for the full breakdown · <a>Something look off?</a></div>`)).querySelector('a').onclick=()=>helpMsg('holding');
+}
+
+/* ── money in & out — ONE timeline (passbook model): direction is an attribute (↓/↑), status carries
+   the color, success stays quiet. Newest first — this is a support surface ("where's my money?"),
+   not a bank statement. Amounts in rupees.
+   Backend forwards ONLY: direction, amount, status (case-normalized), time (date-format-normalized),
+   mode, masked destination, voucher ref, and pay-out's human-readable Reason (displayed, never branched on).
+   Dropped as PII: ClientName, full ClientBankAccNo, Jiffy/Atom IDs, Search_All_Levels (internal branch codes). */
+const PAYIN=[
+  {amt:50,       mode:'UPI',  dest:'ICICI ••7280', ref:'BR755189387', st:'SUCCESS', dt:'2026-07-08T16:19'},
+  {amt:50,       mode:'UPI',  dest:'—',            ref:'',            st:'FAILURE', dt:'2026-07-08T16:17'},
+  {amt:5000,     mode:'—',    dest:'—',            ref:'',            st:'PENDING', dt:'2026-07-08T16:17'},
+  {amt:50,       mode:'UPI',  dest:'ICICI ••7280', ref:'BR094180224', st:'SUCCESS', dt:'2026-07-06T10:21'},
+  {amt:290,      mode:'UPI',  dest:'—',            ref:'',            st:'FAILURE', dt:'2026-06-16T17:57'},
+  {amt:100000,   mode:'—',    dest:'—',            ref:'',            st:'PENDING', dt:'2026-06-12T10:06'},
+  {amt:200,      mode:'UPI',  dest:'ICICI ••7280', ref:'BR081131462', st:'SUCCESS', dt:'2026-06-09T18:07'},
+  {amt:50,       mode:'Bank', dest:'HDFC ••3528',  ref:'BR08395474',  st:'SUCCESS', dt:'2026-05-20T17:46'},
+  {amt:10,       mode:'NB',   dest:'ICICI ••7280', ref:'BR07592439',  st:'SUCCESS', dt:'2026-05-19T13:06'},
+  {amt:10149986, mode:'—',    dest:'—',            ref:'',            st:'PENDING', dt:'2026-05-19T13:00'},
+  {amt:5000,     mode:'UPI',  dest:'—',            ref:'',            st:'FAILURE', dt:'2026-05-19T12:58'},
+  {amt:500,      mode:'UPI',  dest:'ICICI ••7280', ref:'BR17727619',  st:'SUCCESS', dt:'2026-04-16T14:55'},
+  {amt:87,       mode:'—',    dest:'—',            ref:'',            st:'PENDING', dt:'2026-04-23T13:07'},
+];
+/* GetPayOutTxnRpt — same request shape + TotalCount for paging. Upstream quirks normalized here as the
+   backend would: mixed-case statuses (Success/CANCELLED), space-separated dates, "'X008593" Excel-escape
+   artifact in ClientCode. Reason shown verbatim. */
+const PAYOUT=[
+  {dir:'out',amt:150,  dest:'Bank ••8829', st:'FAILURE',   dt:'2026-06-10T21:01', rsn:'Request rejected due to low funds (Rs 70.61). Try again with a smaller amount.'},
+  {dir:'out',amt:0.15, dest:'Bank ••8829', st:'CANCELLED', dt:'2026-06-10T16:17'},
+  {dir:'out',amt:200,  dest:'Bank ••8829', st:'FAILURE',   dt:'2026-06-10T15:01', rsn:'Request rejected due to low funds (Rs 179.27). Try again with a smaller amount.'},
+  {dir:'out',amt:200,  dest:'Bank ••8829', st:'FAILURE',   dt:'2026-06-09T21:27', rsn:'Request rejected due to low funds (Rs 191.94). Try again with a smaller amount.'},
+  {dir:'out',amt:1,    dest:'Bank ••8829', st:'SUCCESS',   dt:'2026-06-05T21:29'},
+  {dir:'out',amt:1,    dest:'Bank ••8829', st:'SUCCESS',   dt:'2026-06-04T16:14'},
+  {dir:'out',amt:10,   dest:'Bank ••8829', st:'SUCCESS',   dt:'2026-05-19T13:09'},
+  {dir:'out',amt:10,   dest:'Bank ••8829', st:'CANCELLED', dt:'2026-05-19T13:01'},
+  {dir:'out',amt:0.10, dest:'Bank ••8829', st:'SUCCESS',   dt:'2026-05-14T15:49'},
+  {dir:'out',amt:600,  dest:'Bank ••8829', st:'SUCCESS',   dt:'2026-04-16T09:56'},
+  {dir:'out',amt:620,  dest:'Bank ••8829', st:'CANCELLED', dt:'2026-04-14T18:32'},
+];
+const payinState={filter:null,shown:6};
+const DIRG={in:'↓',out:'↑'};
+function startPayin(){ engage(); userSay('My pay-in / pay-out'); botThen(()=>flowPayin()); }
+function flowPayin(){
+  add(el(`<div class="bot-line">Here's the money moving through your account — newest first.</div>`));
+  narrate(['Pulling your transactions…','Checking what landed…'], ()=>renderMoneyCard());
+}
+function h12(t){ let [h,mi]=t.split(':').map(Number); const ap=h>=12?'pm':'am'; h=h%12||12; return `${h}:${String(mi).padStart(2,'0')} ${ap}`; }
+function mDate(iso){ const [d,t]=iso.split('T'); const [y,m,day]=d.split('-').map(Number); return {y,m,day,hm:h12(t),mon:MON[m-1]}; }
+const STM={SUCCESS:['ok','✓'],PENDING:['pend','● Pending'],FAILURE:['fail','● Failed'],CANCELLED:['cxl','● Cancelled']};
+function moneyRow(p){
+  const d=mDate(p.dt), dir=p.dir||'in', st=STM[p.st];
+  const meta=[`${d.day} ${d.mon}, ${d.hm}`, p.mode&&p.mode!=='—'?p.mode:null, p.dest&&p.dest!=='—'?p.dest:null].filter(Boolean).join(' · ');
+  const item=el(`<div class="hitem ${p.st==='FAILURE'||p.st==='CANCELLED'?'dim':''}"></div>`);
+  const row=el(`<div class="mrow"><div><div class="mamt"><span class="mdir ${dir}">${DIRG[dir]}</span>${moneyAbs(p.amt)}</div><div class="mmeta">${meta}</div></div><div class="mst ${st[0]}" title="${p.st}">${st[1]}</div></div>`);
+  const det=el(`<div class="hdetail">`
+    +`<div class="hdt"><div class="k">${dir==='out'?'Withdrawal':'Deposit'} requested</div><div class="v">${d.day} ${d.mon} ${d.y}, ${d.hm}</div></div>`
+    +`<div class="hdt"><div class="k">Mode</div><div class="v">${p.mode&&p.mode!=='—'?p.mode:'—'}</div></div>`
+    +`<div class="hdt"><div class="k">${dir==='out'?'To your bank':'To account'}</div><div class="v">${p.dest||'—'}</div></div>`
+    +`<div class="hdt"><div class="k">Reference</div><div class="v">${p.ref||'—'}</div></div>`
+    +(p.rsn?`<div class="hdt wide"><div class="k">Why</div><div class="v">${p.rsn}</div></div>`:'')
+    +`</div>`);
+  row.onclick=()=>det.classList.toggle('open');
+  item.appendChild(row); item.appendChild(det); return item;
+}
+function renderMoneyList(wrap,txns){
+  wrap.innerHTML='';
+  const rows=txns.filter(t=>!payinState.filter||t.st===payinState.filter);
+  if(!rows.length){ wrap.appendChild(el(`<div class="mempty">Nothing here.</div>`)); return; }
+  rows.slice(0,payinState.shown).forEach(t=>wrap.appendChild(moneyRow(t)));
+  if(rows.length>payinState.shown){ const m=el(`<div class="mmore">Show all ${rows.length}</div>`); m.onclick=()=>{payinState.shown=rows.length;renderMoneyList(wrap,txns);scrollDown();}; wrap.appendChild(m); }
+}
+function renderMoneyCard(){
+  const card=add(el(`<div class="card mcard"></div>`));
+  const txns=[...PAYIN,...PAYOUT].sort((a,b)=>b.dt.localeCompare(a.dt));
+  const by=k=>txns.filter(t=>t.st===k);
+  const head=el(`<div class="mhead"><div class="hlabel">Money in & out · 1 Apr – 25 Jul</div><div class="mchips"></div></div>`);
+  const chips=head.querySelector('.mchips'); card.appendChild(head);
+  const listWrap=el(`<div></div>`);
+  [['SUCCESS','landed','var(--online)'],['PENDING','pending','#d97706'],['FAILURE','failed','var(--alert)'],['CANCELLED','cancelled','var(--ink-faint)']].forEach(([k,lab,col])=>{
+    const n=by(k).length; if(!n) return;
+    const c=el(`<button class="mchip" data-k="${k}"><span class="cdot" style="background:${col}"></span>${n} ${lab}</button>`);
+    c.onclick=()=>{ payinState.filter=payinState.filter===k?null:k; payinState.shown=6;
+      chips.querySelectorAll('.mchip').forEach(x=>x.classList.toggle('on',x.dataset.k===payinState.filter));
+      renderMoneyList(listWrap,txns); scrollDown(); };
+    chips.appendChild(c);
+  });
+  card.appendChild(listWrap); renderMoneyList(listWrap,txns);
+  const inL=txns.filter(t=>(t.dir||'in')==='in'&&t.st==='SUCCESS').reduce((s,t)=>s+t.amt,0);
+  const outL=txns.filter(t=>t.dir==='out'&&t.st==='SUCCESS').reduce((s,t)=>s+t.amt,0);
+  card.appendChild(el(`<div class="mfoot">Landed this period: ${moneyAbs(inL)} in · ${moneyAbs(outL)} out</div>`));
+  add(el(`<div class="followup">Something not adding up? <a>Tell me.</a></div>`)).querySelector('a').onclick=()=>helpMsg('payin');
+}
+
+/* ── brokerage rate-card — the plan (slab), not charges billed. Auth = raw SSO JWT. No PII. ── */
+const BROKERAGE=[
+  {title:'Equity',     list:[{t:'Intraday',d:'₹0.10 for trade value of 10 thousand'},{t:'Delivery',d:'₹1.00 for trade value of 10 thousand'}]},
+  {title:'Derivative', list:[{t:'Stock Future',d:'₹20.00 for trade value of 10 thousand'},{t:'Stock Option',d:'₹20.00 per order'},{t:'Index Future',d:'₹20.00 for trade value of 10 thousand'},{t:'Index Option',d:'₹20.00 per order'}]},
+  {title:'Commodity',  list:[{t:'Commodity Future',d:'₹20.00 for trade value of 10 thousand'},{t:'Commodity Option',d:'₹20.00 per order'}]},
+  {title:'Currency',   list:[{t:'Currency Future',d:'₹20.00 for trade value of 10 thousand'},{t:'Currency Option',d:'₹20.00 per order'}]},
+];
+/* Slabs are per-client (ClientID in request) → the rate clusters below are COMPUTED from the
+   response at render time, never hardcoded. Unparseable descs fall back to the plain list. */
+function parseRate(d){
+  const m=d.match(/₹\s*([\d.]+)/); if(!m) return null;
+  const amt=parseFloat(m[1]);
+  if(/per order/i.test(d)) return {amt,unit:'order'};
+  if(/10 thousand|trade value/i.test(d)) return {amt,unit:'per10k'};
+  return null;
+}
+function fmtInr(a){ return '₹'+(Number.isInteger(a)?a:a.toFixed(2)); }
+function fmtPct(a){ return parseFloat((a/100).toFixed(4))+'%'; }
+function brokerageClusters(groups){
+  const items=[];
+  for(const g of groups) for(const it of g.list){ const r=parseRate(it.d); if(!r) return null; items.push({seg:g.title,t:it.t,r}); }
+  const map=new Map();
+  items.forEach(it=>{ const k=it.r.unit+'|'+it.r.amt; if(!map.has(k))map.set(k,[]); map.get(k).push(it); });
+  return map.size<=6?[...map.values()]:null;
+}
+function clusterHead(c){
+  if(c.length===1){ const it=c[0]; return {main:`${it.seg} ${it.t.toLowerCase()}`,cov:null}; }
+  const kind=c.map(it=>it.t.split(' ').pop());
+  if(kind.every(w=>w===kind[0])) return {main:`All ${kind[0].toLowerCase()}s`,cov:c.map(it=>it.t.replace(new RegExp('\\s*'+kind[0]+'$'),'')||it.seg).join(' · ')};
+  return {main:c.map(it=>it.t).join(' · '),cov:null};
+}
+function startBrokerage(){ engage(); userSay('What is my brokerage?'); botThen(()=>flowBrokerage()); }
+function flowBrokerage(){
+  add(el(`<div class="bot-line">Here's what you pay to trade — your brokerage plan.</div>`));
+  narrate(['Fetching your plan…'], ()=>renderBrokerage());
+}
+function renderBrokerage(){
+  const card=add(el(`<div class="card bcard"></div>`));
+  card.appendChild(el(`<div class="bhead"><div class="hlabel">Your brokerage rates</div><div class="bsub">What you pay to trade — grouped by rate</div></div>`));
+  const clusters=brokerageClusters(BROKERAGE);
+  if(clusters){
+    clusters.forEach(c=>{
+      const h=clusterHead(c), r=c[0].r;
+      const val=r.unit==='per10k'?fmtPct(r.amt):fmtInr(r.amt);
+      const unit=r.unit==='per10k'?`${fmtInr(r.amt)} per ₹10,000 traded`:'flat per order';
+      card.appendChild(el(`<div class="brow"><div><div class="bt">${h.main}</div>${h.cov?`<div class="bcov">${h.cov}</div>`:''}</div><div class="brr"><div class="bval">${val}</div><div class="bunit">${unit}</div></div></div>`));
+    });
+  }else{
+    BROKERAGE.forEach(g=>{
+      card.appendChild(el(`<div class="mgroup">${g.title}</div>`));
+      g.list.forEach(it=>card.appendChild(el(`<div class="brow"><div class="bt">${it.t}</div><div class="brr"><div class="bunit">${it.d}</div></div></div>`)));
+    });
+  }
+  card.appendChild(el(`<div class="bnote">Plus statutory charges (STT, exchange fees, GST, stamp duty). These are your plan's rates — a trade's actual charges are on its contract note.</div>`));
+  add(el(`<div class="followup">Want a specific trade's charges? <a>Tell me.</a></div>`)).querySelector('a').onclick=()=>helpMsg('brokerage');
+}
+
 /* ── help → actionable ticket card ── */
 function helpMsg(kind){
   const intro = kind==='pdf' ? "These report PDFs are locked with your PAN (all caps) as the password."
     : kind==='cn' ? "Contract notes aren't password-protected — they should open directly."
+    : kind==='holding' ? "Prices here are from the last fetch — not a live feed — so they can lag the market. Ask again for fresher numbers."
+    : kind==='payin' ? "Deposits can sit as ‘Pending’ before they land; failed ones auto-reverse. Withdrawals need enough free balance — a rejected one says exactly why in its details."
+    : kind==='brokerage' ? "These are your plan rates — a specific trade's charges show on its contract note and P&L."
     : "Email can take a couple of minutes, or land in spam.";
   botThen(()=>{
     add(el(`<div class="bot-line">${intro} Want a hand?</div>`));
