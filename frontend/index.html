@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Choice Jini</title>
+    <script>
+      // Host-controlled theme, applied before the bundle loads so a dark
+      // handoff never flashes the light palette. The bundle strips the
+      // query params from the address bar after parsing (see src/session.ts).
+      ;(function () {
+        var dark = new URLSearchParams(window.location.search).get('isDarkTheme')
+        if (dark !== null && dark.toLowerCase() === 'true') {
+          document.documentElement.dataset.theme = 'dark'
+        }
+      })()
+    </script>
+    <style>
+      /* Pre-CSS backdrop matching the full-bleed page surface so neither
+         theme flashes while the bundle loads. */
+      html {
+        background-color: #ffffff;
+        color-scheme: light;
+      }
+      html[data-theme='dark'] {
+        background-color: #18181b;
+        color-scheme: dark;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

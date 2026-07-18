@@ -1,0 +1,30 @@
+@import 'tailwindcss';
+
+/*
+ * Host-controlled dark mode: the inline script in index.html sets
+ * data-theme="dark" on <html> before first paint when the FinX handoff
+ * includes isDarkTheme=true. All dark: utilities key off that attribute.
+ */
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+@theme {
+  /* Choice Jini design tokens (from the approved mock) */
+
+  /* Accent — violet-600 family */
+  --color-accent: #7c3aed;
+  --color-accent-strong: #6d28d9;
+  --color-accent-soft: #a78bfa;
+  --color-accent-tint: #ede9fe;
+
+  /* Greens — online status + highlight phrases */
+  --color-online: #16a34a;
+  --color-online-soft: #4ade80;
+
+  /* Notification dot */
+  --color-alert: #ef4444;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
