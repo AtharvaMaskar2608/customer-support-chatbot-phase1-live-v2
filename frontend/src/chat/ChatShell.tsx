@@ -5,7 +5,14 @@ import { getFlow, matchFlow } from '../flow/registry'
 import { submitReport, downloadReportFile, type ReportResult } from '../flow/api'
 import { editSlot, fillSlot, lockRun, startRun, type FlowRun } from '../flow/engine'
 import { toHuman, today } from '../flow/dates'
-import type { DeliveryMode, FilledValues, FlowDescriptor, SlotValue } from '../flow/types'
+import type {
+  DateRangeValue,
+  DeliveryMode,
+  FilledValues,
+  FlowDescriptor,
+  SelectionSlot,
+  SlotValue,
+} from '../flow/types'
 import {
   errorLine,
   helpIntro,
@@ -13,14 +20,27 @@ import {
   nextId,
   type Message,
 } from './messages'
+import { downloadContractNote, fetchContractNotes, type ClientNote } from './notes'
 import { EmptyState } from './EmptyState'
 import { Stickers } from './Stickers'
 import { FlowCard } from './FlowCard'
+import { NotesList, ChangeDatesButton } from './NotesList'
 import { Typing, NarratePill } from './Indicators'
 import { EmailCard, FileCard, HelpCard, TicketCard } from './ResultCards'
 import { RichText } from './RichText'
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+/** A flow is live when it has a backend binding (P&L/Ledger/Tax) or a selection
+ *  slot (Contract Notes drives its own list + download calls, not the generic
+ *  delivery step). `comingSoon` still forces the stub. */
+function isLive(descriptor: FlowDescriptor): boolean {
+  if (descriptor.comingSoon) return false
+  return (
+    descriptor.backend !== undefined ||
+    descriptor.slots.some((slot) => slot.type === 'selection')
+  )
+}
 
 /**
  * The chat shell — one continuous conversation (report-chat-shell). The empty
@@ -35,12 +55,33 @@ export function ChatShell({
   const [messages, setMessages] = useState<Message[]>([])
   const [phase, setPhase] = useState<'empty' | 'collapsing' | 'chat'>('empty')
   const scrollRef = useRef<HTMLDivElement>(null)
+  // Flow message ids whose selection step has already been fetched (fetch once,
+  // re-armed when the date is edited). Keeps the effect below idempotent.
+  const selectionStarted = useRef<Set<string>>(new Set())
 
   // Auto-scroll to the newest message.
   useEffect(() => {
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [messages, phase])
+
+  // Drive the selection step: when a flow's active step becomes a selection
+  // slot (Contract Notes, once the date is picked), fetch the list once and
+  // render the tap-to-get UI as its own messages.
+  useEffect(() => {
+    for (const m of messages) {
+      if (m.kind !== 'flow') continue
+      const descriptor = getFlow(m.run.flowKey)
+      if (!descriptor) continue
+      const activeSlot = descriptor.slots.find((s) => s.key === m.run.active)
+      if (activeSlot?.type === 'selection' && !selectionStarted.current.has(m.id)) {
+        selectionStarted.current.add(m.id)
+        void runSelection(descriptor, m.id, m.run.values, activeSlot)
+      }
+    }
+    // runSelection is a stable closure over the imperative helpers below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages])
 
   /* ── message list helpers (imperative, mirroring the prototype) ─────── */
   const append = (m: Message) => setMessages((prev) => [...prev, m])
@@ -76,7 +117,7 @@ export function ChatShell({
   /* ── entry points ───────────────────────────────────────────────────── */
 
   function runFlowBody(descriptor: FlowDescriptor) {
-    if (descriptor.comingSoon || descriptor.backend === undefined) {
+    if (!isLive(descriptor)) {
       bot(
         `That one's coming in the next update — I'm still wiring it up. Right now I can pull your **P&L** live:`,
       )
@@ -115,7 +156,18 @@ export function ChatShell({
     updateRun(msgId, (run) => fillSlot(descriptor, run, slotKey, value))
   }
   function handleEdit(msgId: string, slotKey: string) {
+    const flowMsg = messages.find((m) => m.id === msgId)
     updateRun(msgId, (run) => editSlot(run, slotKey))
+    const descriptor = flowMsg?.kind === 'flow' ? getFlow(flowMsg.run.flowKey) : undefined
+    if (descriptor?.slots.some((s) => s.type === 'selection')) {
+      // Editing the date invalidates the fetched list below — drop everything
+      // after the flow card and re-arm the fetch for the next range.
+      setMessages((prev) => {
+        const idx = prev.findIndex((m) => m.id === msgId)
+        return idx === -1 ? prev : prev.slice(0, idx + 1)
+      })
+      selectionStarted.current.delete(msgId)
+    }
   }
   function handleDeliver(msgId: string, descriptor: FlowDescriptor, run: FlowRun, mode: DeliveryMode) {
     updateRun(msgId, lockRun)
@@ -181,6 +233,98 @@ export function ChatShell({
     })
   }
 
+  /* ── contract-notes selection step (list → tap → download) ──────────── */
+
+  async function runSelection(
+    descriptor: FlowDescriptor,
+    flowMsgId: string,
+    values: FilledValues,
+    slot: SelectionSlot,
+  ) {
+    const range = values['range'] as DateRangeValue | undefined
+    if (range?.type !== 'date') return
+
+    const narration = descriptor.narration.length > 0 ? descriptor.narration : ['Looking up your notes…']
+    const narrId = nextId()
+    append({ id: narrId, kind: 'narrate', caption: narration[0] })
+
+    const listP = fetchContractNotes(slot.source.endpoint, range.fromDate, range.toDate, session)
+    for (let i = 1; i < narration.length; i += 1) {
+      await delay(720)
+      updateCaption(narrId, narration[i])
+    }
+    await delay(400)
+    const result = await listP
+    remove(narrId)
+
+    if (result.kind === 'error') {
+      bot(errorLine(result.code))
+      append({ id: nextId(), kind: 'notesAction', flowMsgId, label: 'Change dates' })
+      return
+    }
+    if (result.notes.length === 0) {
+      bot(`I couldn't find any contract notes for **${range.label}**. Want to try a different date range?`)
+      append({ id: nextId(), kind: 'notesAction', flowMsgId, label: 'Change dates' })
+      return
+    }
+    if (result.notes.length === 1) {
+      // Single-note shortcut: skip the list, download the one note directly.
+      await deliverNote(descriptor, flowMsgId, slot.source.download, result.notes[0], true)
+      return
+    }
+    bot(`Found **${result.notes.length}** contract notes for **${range.label}** — tap any to get it here.`)
+    append({
+      id: nextId(),
+      kind: 'notesList',
+      flowMsgId,
+      downloadEndpoint: slot.source.download,
+      notes: result.notes,
+    })
+  }
+
+  async function deliverNote(
+    descriptor: FlowDescriptor,
+    flowMsgId: string,
+    downloadEndpoint: string,
+    note: ClientNote,
+    single: boolean,
+  ) {
+    const result = await downloadContractNote(downloadEndpoint, note.id, session)
+    if (result.kind === 'error') {
+      bot(errorLine(result.code))
+      return
+    }
+    const segment = note.segment ? ` (${note.segment})` : ''
+    bot(`Here's your contract note for **${note.date}**${single ? '' : segment} ✓`)
+    append({
+      id: nextId(),
+      kind: 'download',
+      flowKey: descriptor.key,
+      values: {},
+      file: result.file,
+      fileToken: result.fileToken,
+      passwordNote: descriptor.result.passwordNote,
+      helpKind: descriptor.result.helpKind,
+      emailable: false, // contract notes have no email delivery
+    })
+    if (single) append({ id: nextId(), kind: 'notesAction', flowMsgId, label: 'Other dates' })
+  }
+
+  function handleNoteTap(flowMsgId: string, downloadEndpoint: string, note: ClientNote) {
+    const flowMsg = messages.find((m) => m.id === flowMsgId)
+    const descriptor = flowMsg?.kind === 'flow' ? getFlow(flowMsg.run.flowKey) : undefined
+    if (!descriptor) return
+    void deliverNote(descriptor, flowMsgId, downloadEndpoint, note, false)
+  }
+
+  function handleChangeDates(flowMsgId: string) {
+    const flowMsg = messages.find((m) => m.id === flowMsgId)
+    const descriptor = flowMsg?.kind === 'flow' ? getFlow(flowMsg.run.flowKey) : undefined
+    const dateSlot = descriptor?.slots.find((s) => s.type === 'date')
+    if (!dateSlot) return
+    handleEdit(flowMsgId, dateSlot.key) // reopens the date step + clears the list
+  }
+
   /* ── result-card actions ────────────────────────────────────────────── */
 
   function handleDownload(fileToken: string, fileName: string) {
@@ -241,6 +385,8 @@ export function ChatShell({
               onHelp={openHelp}
               onResend={handleResend}
               onRaiseTicket={handleRaiseTicket}
+              onNoteTap={handleNoteTap}
+              onChangeDates={handleChangeDates}
             />
           ))}
         </div>
@@ -269,6 +415,8 @@ function MessageView({
   onHelp,
   onResend,
   onRaiseTicket,
+  onNoteTap,
+  onChangeDates,
 }: Readonly<{
   message: Message
   onPick: (msgId: string, descriptor: FlowDescriptor, slotKey: string, value: SlotValue) => void
@@ -280,6 +428,8 @@ function MessageView({
   onHelp: (kind: 'pdf' | 'cn' | 'email') => void
   onResend: () => void
   onRaiseTicket: () => void
+  onNoteTap: (flowMsgId: string, downloadEndpoint: string, note: ClientNote) => void
+  onChangeDates: (flowMsgId: string) => void
 }>) {
   const m = message
   switch (m.kind) {
@@ -319,6 +469,7 @@ function MessageView({
         <FileCard
           file={m.file}
           passwordNote={m.passwordNote}
+          emailable={m.emailable ?? true}
           onDownload={() => onDownload(m.fileToken, m.file.name)}
           onEmailIt={() => onEmailIt(m.flowKey, m.values)}
           onHelp={() => onHelp(m.helpKind)}
@@ -326,6 +477,16 @@ function MessageView({
       )
     case 'email':
       return <EmailCard noun={m.noun} emailMasked={m.emailMasked} onHelp={() => onHelp('email')} />
+    case 'notesList':
+      return (
+        <NotesList
+          notes={m.notes}
+          onPick={(note) => onNoteTap(m.flowMsgId, m.downloadEndpoint, note)}
+          onChangeDates={() => onChangeDates(m.flowMsgId)}
+        />
+      )
+    case 'notesAction':
+      return <ChangeDatesButton label={m.label} onClick={() => onChangeDates(m.flowMsgId)} />
     case 'help':
       return <HelpCard helpKind={m.helpKind} onResend={onResend} onRaiseTicket={onRaiseTicket} />
     case 'ticket':
