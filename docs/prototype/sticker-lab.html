@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sticker Lab — clickable & addictive</title>
+<style>
+  :root{--bg:#f3f4f6;--card:#fff;--ink:#18181b;--ink-soft:#52525b;--ink-faint:#a1a1aa;--line-strong:#e4e4e7}
+  [data-theme="dark"]{--bg:#0b0b0d;--card:#18181b;--ink:#fafafa;--ink-soft:#a1a1aa;--ink-faint:#71717a;--line-strong:#3f3f46}
+  *{box-sizing:border-box}html,body{margin:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);
+    min-height:100vh;display:flex;flex-wrap:wrap;gap:22px;justify-content:center;padding:26px 16px}
+  .col{width:390px;background:var(--card);border-radius:20px;box-shadow:0 10px 34px rgba(24,24,27,.12);padding:20px 18px 24px}
+  [data-theme="dark"] .col{box-shadow:0 10px 40px rgba(0,0,0,.5)}
+  .vlabel{font-size:11px;font-weight:800;letter-spacing:.09em;color:var(--ink-faint);text-transform:uppercase;margin:2px 0 4px}
+  .vsub{font-size:12px;color:var(--ink-soft);margin-bottom:16px}
+  .seclbl{font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--ink-faint);text-transform:uppercase;margin:6px 0 12px}
+  .grid{display:flex;flex-wrap:wrap;gap:10px}
+  button{font-family:inherit;cursor:pointer;border:0}
+  .toolbar{width:100%;text-align:center;margin-bottom:2px}
+  .toolbar button{font-size:12px;border:1px solid var(--line-strong);background:var(--card);color:var(--ink-soft);padding:5px 12px;border-radius:999px}
+  svg{flex-shrink:0}
+
+  /* ── A · Duolingo chunky (3D pressable, colour-coded) ── */
+  .chunky{position:relative;border-radius:15px;padding:13px 15px;font-weight:800;font-size:13.5px;color:#fff;
+    display:flex;align-items:center;gap:9px;background:var(--c);box-shadow:0 4px 0 var(--e);
+    transition:transform .07s ease, box-shadow .07s ease}
+  .chunky:hover{filter:brightness(1.04)}
+  .chunky:active{transform:translateY(4px);box-shadow:0 0 0 var(--e)}
+  .chunky .cic{width:26px;height:26px;border-radius:8px;background:rgba(255,255,255,.22);display:grid;place-items:center}
+
+  /* ── B · Vibrant tiles (2-up, tint bg + filled icon + microcopy) ── */
+  .tiles{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .tile{background:var(--t);border:1px solid var(--tb);border-radius:16px;padding:13px;display:flex;flex-direction:column;gap:9px;
+    text-align:left;transition:transform .14s cubic-bezier(.22,1,.36,1), box-shadow .14s}
+  .tile:hover{transform:translateY(-3px);box-shadow:0 10px 22px var(--g)}
+  .tile:active{transform:translateY(-1px)}
+  .tile .tico{width:38px;height:38px;border-radius:11px;background:var(--c);color:#fff;display:grid;place-items:center;box-shadow:0 4px 10px var(--g)}
+  .tile .tt{font-weight:700;font-size:13.5px;color:var(--ink)}
+  .tile .ts{font-size:11px;color:var(--ink-soft);margin-top:-3px}
+
+  /* ── C · Gradient pill with depth + reveal arrow ── */
+  .gpill{border:1.5px solid var(--line-strong);border-radius:999px;padding:7px 8px 7px 9px;display:flex;align-items:center;gap:9px;
+    background:linear-gradient(180deg,var(--card),var(--t));box-shadow:0 2px 7px rgba(24,24,27,.06);font-weight:700;font-size:13.5px;color:var(--ink);
+    transition:transform .14s, box-shadow .14s, border-color .14s}
+  .gpill:hover{transform:translateY(-2px);box-shadow:0 8px 18px var(--g);border-color:var(--c)}
+  .gpill:active{transform:translateY(0)}
+  .gpill .gic{width:30px;height:30px;border-radius:50%;background:var(--c);color:#fff;display:grid;place-items:center;flex-shrink:0}
+  .gpill .arr{margin-left:4px;color:var(--c);display:flex;opacity:0;transform:translateX(-5px);transition:.14s}
+  .gpill:hover .arr{opacity:1;transform:none}
+</style>
+</head>
+<body>
+  <div class="toolbar"><button onclick="document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark'">◐ Theme</button></div>
+
+  <div class="col">
+    <div class="vlabel">Variant A</div><div class="vsub">Duolingo-chunky — 3D, colour-coded, presses down when tapped</div>
+    <div class="seclbl">Popular right now</div>
+    <div class="grid" id="A"></div>
+  </div>
+
+  <div class="col">
+    <div class="vlabel">Variant B</div><div class="vsub">Vibrant tiles — tinted card, filled icon, one-line hook</div>
+    <div class="seclbl">Popular right now</div>
+    <div class="tiles" id="B"></div>
+  </div>
+
+  <div class="col">
+    <div class="vlabel">Variant C</div><div class="vsub">Gradient pill — subtle depth, icon coin, arrow on hover</div>
+    <div class="seclbl">Popular right now</div>
+    <div class="grid" id="C"></div>
+  </div>
+
+<script>
+const P={
+  chart:'<path d="M3 3v18h18"/><path d="M7 14l3-3 3 3 4-5"/>',
+  book:'<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
+  receipt:'<path d="M5 2v20l2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1z"/><path d="M9 7h6M9 11h6M9 15h4"/>',
+  file:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>',
+  arr:'<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+};
+function ic(n,s){s=s||16;return `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${P[n]}</svg>`;}
+const ITEMS=[
+  {ic:'chart',   label:'Get my P&L',     hook:'This FY, one tap', c:'#7c3aed', e:'#5b21b6', t:'#f1ecfe', tb:'#e4d8fb', g:'rgba(124,58,237,.22)'},
+  {ic:'book',    label:'Show my ledger', hook:'Every debit & credit', c:'#2563eb', e:'#1e40af', t:'#e9f0fe', tb:'#d3e2fc', g:'rgba(37,99,235,.22)'},
+  {ic:'receipt', label:'Capital gains',  hook:'Tax-ready', c:'#d97706', e:'#b45309', t:'#fef3e2', tb:'#f9e2c0', g:'rgba(217,119,6,.22)'},
+  {ic:'file',    label:'Contract notes', hook:'Any trading day', c:'#0d9488', e:'#0f766e', t:'#e2f6f3', tb:'#c4ece5', g:'rgba(13,148,136,.22)'},
+];
+const A=document.getElementById('A'), B=document.getElementById('B'), C=document.getElementById('C');
+ITEMS.forEach(m=>{
+  const st=`--c:${m.c};--e:${m.e};--t:${m.t};--tb:${m.tb};--g:${m.g}`;
+  A.appendChild(el(`<button class="chunky" style="${st}"><span class="cic">${ic(m.ic,16)}</span> ${m.label}</button>`));
+  B.appendChild(el(`<button class="tile" style="${st}"><span class="tico">${ic(m.ic,18)}</span><div><div class="tt">${m.label}</div><div class="ts">${m.hook}</div></div></button>`));
+  C.appendChild(el(`<button class="gpill" style="${st}"><span class="gic">${ic(m.ic,15)}</span> ${m.label} <span class="arr">${ic('arr',15)}</span></button>`));
+});
+function el(h){const t=document.createElement('template');t.innerHTML=h.trim();return t.content.firstChild;}
+</script>
+</body>
+</html>

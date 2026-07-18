@@ -47,6 +47,8 @@ Tests mock the upstream API with `respx` — no live network calls.
 | `GET /api/health` | Liveness check, returns `{"status": "ok"}` |
 | `GET /api/greeting` | Proxies upstream Get Profile; returns `{"firstName": "Pritam"}` or `{"firstName": null}` (degraded). Requires headers `Authorization` (raw SSO JWT, no `Bearer`), `X-Session-Id`, `X-User-Id`. Errors: 400 `MISSING_CREDENTIALS`, 401 `AUTH_EXPIRED`, 502 `UPSTREAM_ERROR`. |
 | `GET /api/whats-new` | "What's new" announcements: `{"version": "...", "items": [{"emoji", "tint", "title", "description"}, ...]}`. No credentials required. |
+| `POST /api/report/pnl` | P&L report proxy → upstream `GetGlobalPNLPDF`. Headers `Authorization` (SSO JWT), `X-Session-Id`, `X-User-Id`. Body `{"segment":"Equity"\|"F&O"\|"Commodity","fromDate":"YYYY-MM-DD","toDate":"YYYY-MM-DD","delivery":"download"\|"email"}`. Download → `{"delivery":"download","file":{…},"fileToken":"…"}`; email → `{"delivery":"email","emailMasked":"san***@gmail.com"}`. Errors: 400 `MISSING_CREDENTIALS`, 401 `AUTH_EXPIRED`, 404 `NO_DATA`, 422 (bad body), 502 `UPSTREAM_ERROR`. See `docs/api_doc/api_documentation.md` §2. |
+| `GET /api/report/file/{fileToken}` | Streams a generated report PDF (`application/pdf`, attachment). Requires the `X-Session-Id` that created the token; opaque, short-TTL, session-bound. The upstream URL is fetched server-side and never returned or logged. |
 
 ## Editing "What's new" content
 
@@ -62,6 +64,12 @@ frontend/app release.
 |---|---|---|
 | `UPSTREAM_PROFILE_URL` | `https://mf.choiceindia.com/api/v2/investor/profile/extended` | Upstream Get Profile endpoint; point at a mock for local testing |
 | `UPSTREAM_TIMEOUT_SECONDS` | `10` | Timeout for upstream calls |
+| `UPSTREAM_FINX_MIDDLEWARE_BASE` | `https://api.choiceindia.com` | Host for the `.NET`/Go report endpoints (P&L, Ledger, Tax) |
+| `UPSTREAM_MIS_BASE` | `https://finx.choiceindia.com` | Host for the MIS/CML reports backend |
+| `UPSTREAM_PNL_URL` | `<middleware base>/api/middleware/GetGlobalPNLPDF` | P&L endpoint; point at a mock for local testing |
+| `UPSTREAM_LEDGER_URL` / `UPSTREAM_TAX_URL` / `UPSTREAM_CML_URL` | derived from the bases | Wave-1 report endpoints (routing wired, flows not yet implemented) |
+| `FINX_FROM_HEADER` | `web_choicejini_1.0` | The non-authenticating `from:` build tag |
+| `REPORT_FILE_TTL_SECONDS` | `300` | TTL for a generated-report download token |
 
 ## PII rules
 

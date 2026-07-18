@@ -96,3 +96,106 @@ numbers) — log only status codes, never response bodies.
 - Unknown/invalid `InvCode` is not a case we handle specially: the host app
   guarantees a valid USER_ID, and invalid credentials simply make the API
   fail — treated the same as any upstream error (degrade gracefully).
+
+---
+
+## 2. P&L Report — `GetGlobalPNLPDF`
+
+Generates the Profit & Loss report (PDF only, PAN-password-protected) and
+either streams it back for download or emails it to the registered address.
+This is the reference report flow; Ledger / Tax / Contract Notes reuse the same
+client, router, and delivery layer (Wave 1).
+
+**Status:** upstream contract live-confirmed in the FinX Android capture
+(`docs/finx_android_api_reference.html`, captured 2026-07-16); our proxy is
+verified against mocked upstreams. Live end-to-end run against FinX is pending
+(change task 6.1).
+
+**Auth is per-endpoint, not per-app.** This is a `.NET` middleware report
+endpoint, so it authenticates with the **SessionId** in `authorization` — *not*
+the SSO JWT (the JWT authenticates the MIS/CML endpoint instead). The `from`
+header is a client build tag, not auth and not a source router.
+
+| Item         | Value                                                             |
+|--------------|-------------------------------------------------------------------|
+| Method       | `POST`                                                            |
+| URL          | `https://api.choiceindia.com/api/middleware/GetGlobalPNLPDF`      |
+| Header       | `authorization: <SessionId>` (the session token, **not** the JWT) |
+| Header       | `from: <build tag>` (non-authenticating, any stable value)        |
+| Header       | `content-type: application/json`                                  |
+
+### Upstream request body — fields we send (`PnlPdfRequest`)
+
+| Field        | Type   | Value we send                                              |
+|--------------|--------|------------------------------------------------------------|
+| `ClientId`   | string | Session-derived client code (from the authenticated session, **never** the request body — IDOR defense) |
+| `UserId`     | string | `== ClientId`                                              |
+| `Group`      | string | `Cash` (Equity) · `Derv` (F&O) · `Comm` (Commodity). Backend-only codes; the customer only ever sees Equity/F&O/Commodity |
+| `FromDate`   | string | `YYYY-MM-DD`                                               |
+| `ToDate`     | string | `YYYY-MM-DD`                                               |
+| `RequestFor` | int    | `0` = download · `1` = email. **Hardcoded per endpoint** — do not centralize (Tax uses `2` for download) |
+| `With_Exp`   | bool   | `true` — charges included, surfaced as "incl. charges"     |
+| `SessionId`  | string | Same session token as the `authorization` header          |
+
+### Response shapes — fields we consume (`FileDeliveryResponse`)
+
+`Response` is polymorphic; branch on delivery mode, never on `Reason`.
+
+```json
+// download (RequestFor 0) — 200
+{ "Status": "Success", "Response": "https://client-report.choiceindia.com/PDFReports/PNLReport_<id>_<ClientId>.pdf", "Reason": "" }
+
+// email (RequestFor 1) — 200; Response leaks the registered email, UPPERCASED
+{ "Status": "Success", "Response": "PnL Report mail sent successfully to <REGISTERED_EMAIL>", "Reason": "" }
+
+// no data — 200 (NOT 401)
+{ "Status": "Fail", "Response": null, "Reason": "Data not found." }
+```
+
+| Field       | Type          | Used for                                                     |
+|-------------|---------------|--------------------------------------------------------------|
+| `Status`    | string        | Success detection: `"Success"` → OK, anything else → `NO_DATA`. Business failures are HTTP 200 — branch on this, never on `Reason` (wording differs across endpoints). |
+| `Response`  | string / null | Download: a report **URL** — sensitive & effectively unauthenticated, fetched server-side and never surfaced/logged. Email: a confirmation string — the leaked email is masked before display. |
+
+`Reason` is **never** inspected or logged.
+
+### Two-layer error mapping
+
+| Upstream                              | Our result       | Client HTTP |
+|---------------------------------------|------------------|-------------|
+| HTTP `401`                            | `AUTH_EXPIRED`   | `401`       |
+| HTTP `204`                            | empty            | `404 NO_DATA` |
+| HTTP `200`, body `Status` != Success  | `NO_DATA`        | `404`       |
+| non-2xx / bad JSON / transport error  | `UPSTREAM_ERROR` | `502`       |
+
+### Our proxy contract (browser ↔ backend)
+
+The browser never calls FinX. It calls our proxy, which owns the credential
+routing, error mapping, and the delivery/PII layer.
+
+- **`POST /api/report/pnl`**
+  - Request headers: `Authorization: <SSO JWT>`, `X-Session-Id: <session token>`,
+    `X-User-Id: <client code>` (same triple as `/api/greeting`).
+  - Request body: `{"segment": "Equity"|"F&O"|"Commodity", "fromDate": "YYYY-MM-DD", "toDate": "YYYY-MM-DD", "delivery": "download"|"email"}`.
+    Any client code smuggled into the body is ignored; the client code sent
+    upstream comes only from `X-User-Id`.
+  - `200` download → `{"delivery":"download","file":{"name":"PnL_<Segment>_<from>_to_<to>.pdf","sizeLabel":"<e.g. 214 KB>","format":"PDF","passwordProtected":true},"fileToken":"<opaque short-lived id>"}`
+  - `200` email → `{"delivery":"email","emailMasked":"san***@gmail.com"}`
+  - `400 MISSING_CREDENTIALS` · `401 AUTH_EXPIRED` · `404 NO_DATA` · `422` (bad body) · `502 UPSTREAM_ERROR`
+- **`GET /api/report/file/{fileToken}`** → streams the PDF bytes
+  (`Content-Type: application/pdf`, `Content-Disposition: attachment`). Requires
+  the `X-Session-Id` that created the token; the token is opaque, short-TTL, and
+  in-memory. The upstream artifact is fetched server-side at token-creation time
+  and the raw upstream URL is never persisted, returned, or logged.
+
+### PII rules
+
+- The report URL / email address are never returned raw to the client or
+  logged. Download returns only an opaque token; the artifact is fetched
+  server-side. Email returns only a masked address (`san***@gmail.com`).
+- Logs carry status code + timing (+ the endpoint key) only — no bodies, URLs,
+  emails, client codes, session tokens, or JWTs. `httpx`'s own request-line
+  logging (which includes the full URL) is silenced for this reason.
+
+> No real tokens, client codes, emails, or report URLs appear in this repo. All
+> examples above use placeholders.
