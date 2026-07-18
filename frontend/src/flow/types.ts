@@ -18,8 +18,10 @@ import type { ComponentType, SVGProps } from 'react'
 
 export type IconComponent = ComponentType<SVGProps<SVGSVGElement>>
 
-/** Sticker/icon tint key → static Tailwind classes (see Sticker component). */
-export type TintKey = 'violet' | 'blue' | 'amber' | 'teal'
+/** Sticker/icon tint key → static Tailwind classes (see Sticker component).
+ *  cyan = holdings; emerald/rose are reserved for the Wave-B data flows
+ *  (pay in/out, brokerage). */
+export type TintKey = 'violet' | 'blue' | 'amber' | 'teal' | 'cyan' | 'emerald' | 'rose'
 
 /* ── Slot definitions (the ordered questions a flow asks) ─────────────── */
 
@@ -131,9 +133,10 @@ export type FilledValues = Record<string, SlotValue>
 
 /* ── Result mapping + backend binding ─────────────────────────────────── */
 
-/** Which help copy the "Tell me" affordance opens: a PAN-locked report PDF,
- *  an (unprotected) contract note, or an email-delivery hiccup. */
-export type HelpKind = 'pdf' | 'cn' | 'email'
+/** Which help copy the help affordance opens: a PAN-locked report PDF, an
+ *  (unprotected) contract note, an email-delivery hiccup, or the holdings
+ *  last-fetch-not-live explanation. */
+export type HelpKind = 'pdf' | 'cn' | 'email' | 'holding' | 'payin' | 'brokerage'
 
 export interface ResultConfig {
   /** Bot line above the file/email card. `**bold**` marks emphasis. */
@@ -160,8 +163,11 @@ export interface FlowDescriptor {
   key: string
   /** Home-screen ordering (ascending). */
   order: number
-  /** Sticker label + the phrase echoed as the user's message on tap. */
+  /** The phrase echoed as the user's message on tap (and the default
+   *  sticker label when `stickerLabel` is absent). */
   trigger: string
+  /** Short sticker label when it should differ from the echoed phrase. */
+  stickerLabel?: string
   /** Composer keyword routing: text matching this starts the flow. */
   keywords: RegExp
   /** Sticker presentation. */

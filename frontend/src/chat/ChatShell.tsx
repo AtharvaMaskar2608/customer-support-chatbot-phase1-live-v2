@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { ArrowUpIcon } from '../icons'
 import { hasCredentials, type SessionContext } from '../session'
 import { getFlow, matchFlow } from '../flow/registry'
+import { getDataFlow, matchDataFlow } from '../flow/dataRegistry'
+import { isDataFlow, type AnyFlowDescriptor, type DataFlowDescriptor } from '../flow/dataflow'
 import { submitReport, downloadReportFile, type ReportResult } from '../flow/api'
 import { editSlot, fillSlot, lockRun, startRun, type FlowRun } from '../flow/engine'
 import { toHuman, today } from '../flow/dates'
@@ -10,10 +12,12 @@ import type {
   DeliveryMode,
   FilledValues,
   FlowDescriptor,
+  HelpKind,
   SelectionSlot,
   SlotValue,
 } from '../flow/types'
 import {
+  dataErrorLine,
   errorLine,
   helpIntro,
   makeTicketId,
@@ -27,6 +31,7 @@ import { FlowCard } from './FlowCard'
 import { NotesList, ChangeDatesButton } from './NotesList'
 import { Typing, NarratePill } from './Indicators'
 import { EmailCard, FileCard, HelpCard, TicketCard } from './ResultCards'
+import { DataCardFrame, DataFollowup, EmptyCardLine } from './datacards/primitives'
 import { RichText } from './RichText'
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
@@ -128,23 +133,34 @@ export function ChatShell({
     append({ id: nextId(), kind: 'flow', run: startRun(descriptor) })
   }
 
-  /** Sticker tap. */
-  function startFromSticker(descriptor: FlowDescriptor) {
-    engage()
-    user(descriptor.trigger)
-    botThen(() => runFlowBody(descriptor))
+  /** Zero-slot data flow: intro line → narrated fetch → the card. */
+  function runDataFlowBody(descriptor: DataFlowDescriptor) {
+    bot(descriptor.intro)
+    void generateData(descriptor)
   }
 
-  /** Composer submit → keyword routing. */
+  /** Sticker tap (file or data flow). */
+  function startFromSticker(descriptor: AnyFlowDescriptor) {
+    engage()
+    user(descriptor.trigger)
+    botThen(() =>
+      isDataFlow(descriptor) ? runDataFlowBody(descriptor) : runFlowBody(descriptor),
+    )
+  }
+
+  /** Composer submit → keyword routing (data flows first, then file flows). */
   function onSend(text: string) {
     engage()
     user(text)
-    const flow = matchFlow(text)
+    const flow: AnyFlowDescriptor | null = matchDataFlow(text) ?? matchFlow(text)
     botThen(() => {
       if (flow) {
-        runFlowBody(flow)
+        if (isDataFlow(flow)) runDataFlowBody(flow)
+        else runFlowBody(flow)
       } else {
-        bot('I can pull your P&L, ledger, capital gains and contract notes right now — tap one:')
+        bot(
+          'I can show your holdings, money in/out and brokerage, or pull your P&L, ledger, capital gains and contract notes — tap one:',
+        )
         append({ id: nextId(), kind: 'actions' })
       }
     })
@@ -199,6 +215,35 @@ export function ChatShell({
     const result = await resultP
     remove(narrId)
     renderResult(descriptor, values, result)
+  }
+
+  /** Data-flow generation: narrated wait + fetch overlapped, then the card
+   *  (or the calm empty state / graceful error line). */
+  async function generateData(descriptor: DataFlowDescriptor) {
+    const narrId = nextId()
+    append({ id: narrId, kind: 'narrate', caption: descriptor.narration[0] })
+
+    const resultP = descriptor.fetch(session)
+    for (let i = 1; i < descriptor.narration.length; i += 1) {
+      await delay(720)
+      updateCaption(narrId, descriptor.narration[i])
+    }
+    await delay(560)
+    const result = await resultP
+    remove(narrId)
+
+    if (result.kind === 'error') {
+      bot(dataErrorLine(result.code, descriptor.errorNoun))
+      return
+    }
+    if (result.kind === 'empty') {
+      append({ id: nextId(), kind: 'dataEmpty', flowKey: descriptor.key })
+      return
+    }
+    append({ id: nextId(), kind: 'datacard', flowKey: descriptor.key, data: result.data })
+    if (descriptor.followup) {
+      append({ id: nextId(), kind: 'dataFollowup', flowKey: descriptor.key })
+    }
   }
 
   function renderResult(
@@ -336,7 +381,7 @@ export function ChatShell({
     user('Email it to me')
     void generate(descriptor, values, 'email')
   }
-  function openHelp(kind: 'pdf' | 'cn' | 'email') {
+  function openHelp(kind: HelpKind) {
     botThen(() => {
       bot(helpIntro(kind))
       append({ id: nextId(), kind: 'help', helpKind: kind })
@@ -376,6 +421,7 @@ export function ChatShell({
             <MessageView
               key={m.id}
               message={m}
+              session={session}
               onPick={handlePick}
               onEdit={handleEdit}
               onDeliver={handleDeliver}
@@ -406,6 +452,7 @@ export function ChatShell({
 
 function MessageView({
   message,
+  session,
   onPick,
   onEdit,
   onDeliver,
@@ -419,13 +466,14 @@ function MessageView({
   onChangeDates,
 }: Readonly<{
   message: Message
+  session: SessionContext
   onPick: (msgId: string, descriptor: FlowDescriptor, slotKey: string, value: SlotValue) => void
   onEdit: (msgId: string, slotKey: string) => void
   onDeliver: (msgId: string, descriptor: FlowDescriptor, run: FlowRun, mode: DeliveryMode) => void
-  onSticker: (descriptor: FlowDescriptor) => void
+  onSticker: (descriptor: AnyFlowDescriptor) => void
   onDownload: (fileToken: string, fileName: string) => void
   onEmailIt: (flowKey: string, values: FlowRun['values']) => void
-  onHelp: (kind: 'pdf' | 'cn' | 'email') => void
+  onHelp: (kind: HelpKind) => void
   onResend: () => void
   onRaiseTicket: () => void
   onNoteTap: (flowMsgId: string, downloadEndpoint: string, note: ClientNote) => void
@@ -491,6 +539,32 @@ function MessageView({
       return <HelpCard helpKind={m.helpKind} onResend={onResend} onRaiseTicket={onRaiseTicket} />
     case 'ticket':
       return <TicketCard ticketId={m.ticketId} />
+    case 'datacard': {
+      const descriptor = getDataFlow(m.flowKey)
+      if (!descriptor) return null
+      const Card = descriptor.Card
+      return <Card data={m.data} session={session} />
+    }
+    case 'dataEmpty': {
+      const descriptor = getDataFlow(m.flowKey)
+      if (!descriptor) return null
+      return (
+        <DataCardFrame>
+          <EmptyCardLine>{descriptor.emptyLine}</EmptyCardLine>
+        </DataCardFrame>
+      )
+    }
+    case 'dataFollowup': {
+      const descriptor = getDataFlow(m.flowKey)
+      if (!descriptor?.followup) return null
+      return (
+        <DataFollowup
+          text={descriptor.followup.text}
+          linkLabel={descriptor.followup.linkLabel}
+          onClick={() => onHelp(descriptor.helpKind)}
+        />
+      )
+    }
   }
 }
 

@@ -289,3 +289,79 @@ accept a client code from input.
 
 - `POST /api/report/contract-notes/list` — body `{"fromDate","toDate"}` → `{"notes":[{id,date,segment,badge,month}]}`. `id` is an **opaque per-session token** mapped to `file_id` server-side; `file_id` never leaves the backend.
 - `POST /api/report/contract-notes/download` — body `{"id"}` → `{delivery:"download", file, fileToken}` (`passwordProtected:false`). Same `GET /api/report/file/{token}`.
+
+## 6. Holdings — `COTI/V1/Holdings`
+
+**Status:** verified live 2026-07-18. Data endpoint (rendered in chat, no file).
+
+| Item | Value |
+|------|-------|
+| Call | `POST /COTI/V1/Holdings` (**finxomne**.choiceindia.com) · `authorization: Session <SessionId>` (prefix) |
+| Auth note | The web app also sends `ssotoken`, body `accessToken` (FINX-issued JWT) and `fingerprint` — **none are enforced** (probed live: Session header alone → 200). |
+| Body | `{"UserId","UserCode","GroupId":"HO","SessionId","Status":""}` — **required** (empty body → upstream 404). All values session-derived. |
+
+### Fields we consume (per scrip in `Response.lDictHoldingData`, keyed by ISIN)
+
+| Field | Notes |
+|-------|-------|
+| `Sym` | e.g. `BANKBARODA-EQ` — `-EQ` suffix stripped for display |
+| `Name` | full scrip name |
+| `Q` | quantity held |
+| `ABP` | avg buy price, **rupees** |
+| `LTP` / `CP` | last traded / previous close price, **PAISE — divide by 100** (confirmed against FinX's own CSV export) |
+| `LUT` | `DD-MM-YYYY HH:MM:SS` — max across scrips = the card's freshness stamp |
+
+Empty portfolio = `Status: Success` with empty `lDictHoldingData` dict.
+
+### Our proxy contract
+
+- `POST /api/data/holdings` (headers only, no body) → `{"kind":"ok","asOf":"<ISO max LUT>","rows":[{sym,name,qty,abp,ltp,current,invested,pnl,pnlPct,day,dayPct,alloc}…] sorted by current desc, "totals":{current,invested,pnl,pnlPct,day,dayPct,count}}`. All derivation server-side. Empty → `{"kind":"empty"}`.
+
+## 7. Pay-In / Pay-Out — `GetPayInTxnRpt` + `GetPayOutTxnRpt`
+
+**Status:** verified live 2026-07-18 (72 merged transactions). Data endpoints, merged into one timeline.
+
+| Item | Value |
+|------|-------|
+| Calls | `POST /api/middleware/GetPayInTxnRpt` and `…/GetPayOutTxnRpt` (finx.choiceindia.com) · `authorization: <SessionId>` (bare) |
+| Body | `{"UserID","FromDate","ToDate","Segment":"","Status":"","StartPos":0,"NoOfRecords":500}` · default period FY-start → today+7 |
+| Paging | `Response.TotalCount[0].TotalRecords` |
+
+### Fields we consume (per txn in `Response.PayInTxn[]` / `Response.PayOutTxn[]`)
+
+| Field | Notes |
+|-------|-------|
+| `Amount` | rupees |
+| `Status` | **mixed casing upstream** (`SUCCESS` vs `Success`/`CANCELLED`) → normalized case-insensitively to `SUCCESS\|PENDING\|FAILURE\|CANCELLED` |
+| `RequestedDateTime` | **two formats** (ISO-`T` pay-in, space-separated pay-out) → ISO 8601 |
+| `ModeOfPayment` | pay-in only (`UPI`/`NB`/empty) |
+| `DepositBankName` (in) / `ClientBankName`+`ClientBankAccNo` (out) | masked to bank + last-4 (`ICICI ••7280`, `Bank ••8829`) |
+| `VoucherNo` | reference shown in detail |
+| `Reason` | pay-out only — human-readable, **displayed verbatim, never branched on** |
+
+**Dropped (PII/internal):** `ClientName`, full account numbers, `JiffyTransactionId`, `AtomReferenceNo`, `Search_All_Levels` (internal branch/employee hierarchy). Upstream quirks noted for FinX: `ClientCode` arrives as `'X008593` (Excel-escape artifact); empty-date sentinels differ (`1900-01-01…` vs `""`).
+
+### Our proxy contract
+
+- `POST /api/data/money` (headers only) → fetches both directions **concurrently**, returns `{"kind":"ok","txns":[{dir,amt,st,dt,mode,dest,ref,rsn}…] newest-first, "counts":{…}, "landed":{"in","out"} (SUCCESS only), "totalRecords":{"in","out"}}`; one direction failing → successful side + `"partial":true`.
+
+## 8. Brokerage Slab — `get-brokerage-slab`
+
+**Status:** shape verified from live capture 2026-07-18 (endpoint needs a **fresh SSO JWT**). Data endpoint.
+
+| Item | Value |
+|------|-------|
+| Call | `POST /middleware-go/v2/get-brokerage-slab` (**api**.choiceindia.com) · `authorization: <raw SSO JWT>` |
+| Body | `{"ClientID"}` — slabs are **per-client**; never hardcode groupings |
+
+### Fields we consume (`Response[]`)
+
+| Field | Notes |
+|-------|-------|
+| `title` | segment group (Equity / Derivative / Commodity / Currency) |
+| `list[].title` | line item (Intraday, Stock Future, …) |
+| `list[].desc` | rate text (e.g. `₹1.00 for trade value of 10 thousand`, `₹20.00 per order`) — parsed client-side for rate clustering, rendered verbatim on parse failure |
+
+### Our proxy contract
+
+- `POST /api/data/brokerage` (headers only) → `{"kind":"ok","groups":[{title,list:[{title,desc}]}]}` passthrough (no PII) after the field-based `Status` gate.
