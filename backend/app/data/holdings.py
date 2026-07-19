@@ -26,12 +26,13 @@ import logging
 
 from fastapi import APIRouter, Header, Request
 
-from app.data.envelope import (
-    KIND_EMPTY,
-    KIND_OK,
-    error_response,
-    missing_credentials,
+from app.agent.ctx import (
+    ToolCtx,
+    ToolError,
+    error_json_response,
+    tool_error_from_kind,
 )
+from app.data.envelope import KIND_EMPTY, KIND_OK, missing_credentials
 from app.data.normalize import paise_to_rupees, parse_upstream_datetime
 from app.finx.client import FinxClient, ResultKind
 from app.finx.routing import Endpoint
@@ -152,6 +153,45 @@ def _build_card(scrip_dict: dict) -> dict:
     }
 
 
+async def run_holdings(
+    params: dict | None, ctx: ToolCtx
+) -> dict | ToolError:
+    """Holdings flow core — shared by the REST route and the agent tool.
+
+    Zero-slot: `params` is ignored (nothing user-controlled reaches upstream —
+    IDOR defense by construction). Returns the route's exact 200 body
+    ({"kind": "ok"/"empty", ...}) on success, a ToolError otherwise; never
+    raises. The payload is field-whitelisted (Sym/Name/Q/ABP/LTP/CP + derived).
+    """
+    del params  # zero-slot: no user-intent fields exist for this flow
+
+    # Auth probe (A/B/C, all 200) showed only the Session header credential is
+    # enforced — but the BODY fields are required (empty body → upstream 404).
+    # All values come from the authenticated session context, never user input.
+    finx = FinxClient(ctx.http_client)
+    result = await finx.call(
+        Endpoint.HOLDINGS,
+        session_id=ctx.session_id,
+        sso_jwt=ctx.sso_jwt,
+        body={
+            "UserId": ctx.client_code,
+            "UserCode": ctx.client_code,
+            "GroupId": "HO",
+            "SessionId": ctx.session_id,
+            "Status": "",
+        },
+    )
+    if result.kind is ResultKind.EMPTY:
+        return {"kind": KIND_EMPTY}
+    if result.kind is not ResultKind.OK:
+        return tool_error_from_kind(result.kind)
+
+    scrip_dict = _extract_scrips(result.payload)
+    if scrip_dict is None:
+        return tool_error_from_kind(ResultKind.UPSTREAM_ERROR)
+    return _build_card(scrip_dict)
+
+
 @router.post("/api/data/holdings")
 async def holdings(
     request: Request,
@@ -162,28 +202,13 @@ async def holdings(
     if not authorization or not x_session_id or not x_user_id:
         return missing_credentials()
 
-    # Auth probe (A/B/C, all 200) showed only the Session header credential is
-    # enforced — but the BODY fields are required (empty body → upstream 404).
-    # All values come from the authenticated session headers, never user input.
-    finx = FinxClient(request.app.state.http_client)
-    result = await finx.call(
-        Endpoint.HOLDINGS,
+    ctx = ToolCtx(
         session_id=x_session_id,
         sso_jwt=authorization,
-        body={
-            "UserId": x_user_id,
-            "UserCode": x_user_id,
-            "GroupId": "HO",
-            "SessionId": x_session_id,
-            "Status": "",
-        },
+        client_code=x_user_id,
+        http_client=request.app.state.http_client,
     )
-    if result.kind is ResultKind.EMPTY:
-        return {"kind": KIND_EMPTY}
-    if result.kind is not ResultKind.OK:
-        return error_response(result.kind)
-
-    scrip_dict = _extract_scrips(result.payload)
-    if scrip_dict is None:
-        return error_response(ResultKind.UPSTREAM_ERROR)
-    return _build_card(scrip_dict)
+    result = await run_holdings(None, ctx)
+    if isinstance(result, ToolError):
+        return error_json_response(result)
+    return result

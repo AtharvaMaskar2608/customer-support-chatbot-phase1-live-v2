@@ -199,3 +199,86 @@ def openai_api_key() -> str | None:
 def kb_embed_model() -> str:
     """Embedding model — MUST match the corpus embeddings (3072-d)."""
     return os.environ.get("KB_EMBED_MODEL", "text-embedding-3-large")
+
+
+# --- Agent loop (CHO-213) ----------------------------------------------------
+#
+# Model + thinking are two env knobs (design D10). The thinking request-param
+# mapping is per-model and lives HERE so the loop code stays model-agnostic:
+# the two supported models straddle the thinking-API generation change
+# (Haiku 4.5 still takes budget_tokens; Sonnet 4.6 deprecates it in favour of
+# adaptive + effort), so "minimal" cannot be one literal.
+
+AGENT_MODEL_DEFAULT = "claude-haiku-4-5"
+AGENT_MODELS = ("claude-haiku-4-5", "claude-sonnet-4-6")
+AGENT_THINKING_MODES = ("off", "minimal")
+
+# API minimum for budget_tokens; must stay < agent_max_tokens().
+_HAIKU_THINKING_BUDGET = 1024
+
+
+def agent_model() -> str:
+    """Loop model (AGENT_MODEL env; unknown values fall back to the default)."""
+    model = os.environ.get("AGENT_MODEL", AGENT_MODEL_DEFAULT)
+    return model if model in AGENT_MODELS else AGENT_MODEL_DEFAULT
+
+
+def agent_thinking() -> str:
+    """Thinking mode (AGENT_THINKING env): "off" (default) or "minimal"."""
+    mode = os.environ.get("AGENT_THINKING", "off")
+    return mode if mode in AGENT_THINKING_MODES else "off"
+
+
+def agent_thinking_params(model: str, mode: str) -> dict:
+    """Per-model request kwargs for the chosen thinking mode (design D10).
+
+    off               -> {} (omit `thinking` on both models)
+    minimal + haiku   -> {"thinking": {"type": "enabled", "budget_tokens": 1024}}
+                         (1024 = API minimum; must be < max_tokens)
+    minimal + sonnet  -> {"thinking": {"type": "adaptive"},
+                          "output_config": {"effort": "low"}}
+                         (budget_tokens is deprecated on 4.6; effort is
+                          unsupported on Haiku)
+    No other thinking configuration is ever sent.
+    """
+    if mode != "minimal":
+        return {}
+    if model == "claude-sonnet-4-6":
+        return {
+            "thinking": {"type": "adaptive"},
+            "output_config": {"effort": "low"},
+        }
+    return {
+        "thinking": {"type": "enabled", "budget_tokens": _HAIKU_THINKING_BUDGET}
+    }
+
+
+def agent_max_tokens() -> int:
+    """max_tokens per model call (AGENT_MAX_TOKENS env). The default (4096)
+    exceeds the Haiku minimal-thinking budget (1024), as the API requires."""
+    return int(os.environ.get("AGENT_MAX_TOKENS", "4096"))
+
+
+def clarify_cap() -> int:
+    """Max clarifying questions per task window (CLARIFY_CAP env)."""
+    return int(os.environ.get("CLARIFY_CAP", "2"))
+
+
+def task_turn_cap() -> int:
+    """Max user turns per task window (TASK_TURN_CAP env)."""
+    return int(os.environ.get("TASK_TURN_CAP", "10"))
+
+
+def session_turn_cap() -> int:
+    """Max user turns per session — the dumb backstop (SESSION_TURN_CAP env)."""
+    return int(os.environ.get("SESSION_TURN_CAP", "20"))
+
+
+def agent_max_tool_rounds() -> int:
+    """Inner guard: tool rounds per user message (AGENT_MAX_TOOL_ROUNDS env)."""
+    return int(os.environ.get("AGENT_MAX_TOOL_ROUNDS", "5"))
+
+
+def anthropic_api_key() -> str | None:
+    """Anthropic key for the agent loop (env, or repo-root .env in dev)."""
+    return _secret("ANTHROPIC_API_KEY")

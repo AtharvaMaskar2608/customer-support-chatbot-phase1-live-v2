@@ -111,11 +111,10 @@ function parseInOut(x: unknown): { in: number; out: number } | null {
   return { in: r.in, out: r.out }
 }
 
-export async function fetchMoney(session: SessionContext): Promise<MoneyResult> {
-  const envelope = await postData('/api/data/money', session)
-  if (envelope.kind !== 'ok') return envelope
-
-  const { txns, counts, landed, totalRecords, partial } = envelope.body
+/** Validate + normalize an `ok` payload body. Shared by the flow fetch and
+ *  the agent's data artifacts (CHO-213) — both render the same card. */
+export function parseMoneyPayload(body: Record<string, unknown>): MoneyResult {
+  const { txns, counts, landed, totalRecords, partial } = body
   if (!Array.isArray(txns) || typeof partial !== 'boolean') {
     return { kind: 'error', code: 'upstream_error' }
   }
@@ -138,4 +137,10 @@ export async function fetchMoney(session: SessionContext): Promise<MoneyResult> 
     kind: 'ok',
     data: { txns: parsed, counts: c, landed: l, totalRecords: tr, partial },
   }
+}
+
+export async function fetchMoney(session: SessionContext): Promise<MoneyResult> {
+  const envelope = await postData('/api/data/money', session)
+  if (envelope.kind !== 'ok') return envelope
+  return parseMoneyPayload(envelope.body)
 }

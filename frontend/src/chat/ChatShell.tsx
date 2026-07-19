@@ -17,13 +17,17 @@ import type {
   SlotValue,
 } from '../flow/types'
 import {
+  agentInterruptLine,
   dataErrorLine,
   errorLine,
   helpIntro,
   makeTicketId,
   nextId,
+  toolCaption,
   type Message,
 } from './messages'
+import { streamAgentChat, type AgentArtifact } from './agent'
+import { parseDataArtifact } from './agentArtifacts'
 import { downloadContractNote, fetchContractNotes, type ClientNote } from './notes'
 import { EmptyState } from './EmptyState'
 import { Stickers } from './Stickers'
@@ -148,22 +152,154 @@ export function ChatShell({
     )
   }
 
-  /** Composer submit → keyword routing (data flows first, then file flows). */
+  /** Composer submit → the agent first (free text is the agent's job;
+   *  keyword routing survives only as the AGENT_UNAVAILABLE fallback). */
   function onSend(text: string) {
     engage()
     user(text)
+    void runAgent(text)
+  }
+
+  /** The pre-agent behavior: keyword-route (data flows first, then file
+   *  flows), else offer the sticker row. Now the degraded fallback. */
+  function routeByKeyword(text: string) {
     const flow: AnyFlowDescriptor | null = matchDataFlow(text) ?? matchFlow(text)
-    botThen(() => {
-      if (flow) {
-        if (isDataFlow(flow)) runDataFlowBody(flow)
-        else runFlowBody(flow)
-      } else {
-        bot(
-          'I can show your holdings, money in/out and brokerage, or pull your P&L, ledger, capital gains and contract notes — tap one:',
-        )
-        append({ id: nextId(), kind: 'actions' })
+    if (flow) {
+      if (isDataFlow(flow)) runDataFlowBody(flow)
+      else runFlowBody(flow)
+    } else {
+      bot(
+        'I can show your holdings, money in/out and brokerage, or pull your P&L, ledger, capital gains and contract notes — tap one:',
+      )
+      append({ id: nextId(), kind: 'actions' })
+    }
+  }
+
+  /* ── agent path (free text → POST /api/chat SSE) ────────────────────── */
+
+  /** In-flight agent stream — superseded (aborted) by the next submit. */
+  const agentAbort = useRef<AbortController | null>(null)
+
+  /**
+   * Stream one agent exchange: typing dots until the first event, text
+   * deltas growing an in-place bot message, tool rounds as a progress pill,
+   * artifacts through the existing file/data cards. AGENT_UNAVAILABLE falls
+   * back to keyword routing for the same text; AUTH_EXPIRED uses the shell's
+   * session-expired copy.
+   */
+  async function runAgent(text: string) {
+    agentAbort.current?.abort()
+    const controller = new AbortController()
+    agentAbort.current = controller
+
+    let indicatorId: string | null = nextId()
+    append({ id: indicatorId, kind: 'typing' })
+    let streamId: string | null = null // the currently-growing agent message
+    let rendered = false // any text/artifact on screen yet?
+
+    const clearIndicator = () => {
+      if (indicatorId !== null) {
+        remove(indicatorId)
+        indicatorId = null
       }
-    })
+    }
+    const showProgress = (caption: string) => {
+      clearIndicator()
+      indicatorId = nextId()
+      append({ id: indicatorId, kind: 'narrate', caption })
+    }
+
+    await streamAgentChat(
+      text,
+      session,
+      {
+        onText: (delta) => {
+          clearIndicator()
+          rendered = true
+          if (streamId === null) {
+            streamId = nextId()
+            append({ id: streamId, kind: 'agent', text: delta })
+          } else {
+            appendAgentDelta(streamId, delta)
+          }
+        },
+        onTool: (ev) => {
+          // Text after a tool round is a fresh assistant message → new bubble.
+          streamId = null
+          if (ev.status === 'started') showProgress(toolCaption(ev.name))
+          // 'finished' keeps the pill up; the next text/artifact replaces it.
+        },
+        onArtifact: (artifact) => {
+          clearIndicator()
+          streamId = null
+          rendered = true
+          renderAgentArtifact(artifact)
+        },
+        onDone: () => {
+          clearIndicator()
+          // Defensive: an empty reply must never leave dead air.
+          if (!rendered) routeByKeyword(text)
+        },
+        onError: (code) => {
+          clearIndicator()
+          if (code === 'AUTH_EXPIRED') {
+            bot(errorLine('AUTH_EXPIRED')) // the shell's session-expired copy
+            return
+          }
+          // AGENT_UNAVAILABLE → degraded mode: the pre-agent keyword routing.
+          if (!rendered) routeByKeyword(text)
+          else bot(agentInterruptLine())
+        },
+      },
+      controller.signal,
+    )
+    // A superseded (aborted) stream fires no callbacks — drop its indicator.
+    if (controller.signal.aborted) clearIndicator()
+  }
+
+  function appendAgentDelta(msgId: string, delta: string) {
+    setMessages((prev) =>
+      prev.map((m) => (m.id === msgId && m.kind === 'agent' ? { ...m, text: m.text + delta } : m)),
+    )
+  }
+
+  /** Render an artifact event through the EXISTING result renderers. */
+  function renderAgentArtifact(artifact: AgentArtifact) {
+    if (artifact.kind === 'file') {
+      // Same card + /api/report/file/{token} mechanics as the report flows.
+      const descriptor = artifact.flowKey !== undefined ? getFlow(artifact.flowKey) : undefined
+      append({
+        id: nextId(),
+        kind: 'download',
+        flowKey: artifact.flowKey ?? '',
+        values: {},
+        file: artifact.file,
+        fileToken: artifact.fileToken,
+        passwordNote:
+          descriptor?.result.passwordNote ??
+          (artifact.file.passwordProtected ? 'password: PAN' : null),
+        helpKind: descriptor?.result.helpKind ?? 'pdf',
+        // "Email it" replays a slot-filled flow; the agent card has no slot
+        // values to replay — delivery changes go back through chat instead.
+        emailable: false,
+      })
+      return
+    }
+    const parsed = parseDataArtifact(artifact)
+    if (parsed === null) return // unknown tool — the agent's text narrates
+    if (parsed.kind === 'error') {
+      // Malformed payload degrades exactly like the deterministic flow would.
+      bot(dataErrorLine(parsed.code, getDataFlow(parsed.flowKey)?.errorNoun ?? 'that'))
+      return
+    }
+    if (parsed.kind === 'empty') {
+      append({ id: nextId(), kind: 'dataEmpty', flowKey: parsed.flowKey })
+      return
+    }
+    append({ id: nextId(), kind: 'datacard', flowKey: parsed.flowKey, data: parsed.data })
+    if (getDataFlow(parsed.flowKey)?.followup) {
+      append({ id: nextId(), kind: 'dataFollowup', flowKey: parsed.flowKey })
+    }
   }
 
   /* ── slot interactions ──────────────────────────────────────────────── */
@@ -490,6 +626,14 @@ function MessageView({
     case 'bot':
       return (
         <p className="text-[14.5px] leading-normal text-zinc-800 dark:text-zinc-100">
+          <RichText text={m.text} />
+        </p>
+      )
+    case 'agent':
+      // Streamed reply — same look as `bot`, pre-wrap so the model's line
+      // breaks and paragraphs survive (raw markdown beyond ** is not sent).
+      return (
+        <p className="text-[14.5px] leading-normal whitespace-pre-wrap text-zinc-800 dark:text-zinc-100">
           <RichText text={m.text} />
         </p>
       )

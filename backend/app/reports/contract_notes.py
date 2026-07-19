@@ -43,6 +43,14 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from app import config
+from app.agent.ctx import (
+    CODE_UPSTREAM_ERROR,
+    ToolCtx,
+    ToolError,
+    error_json_response,
+    parse_params,
+    tool_error_from_kind,
+)
 from app.finx.client import ResultKind, map_response
 from app.finx.delivery import size_label
 from app.finx.routing import AuthSource, BodyShape, RouteSpec
@@ -214,15 +222,6 @@ def _missing_credentials() -> JSONResponse:
     return JSONResponse(status_code=400, content={"error": "MISSING_CREDENTIALS"})
 
 
-def _error_response(kind: ResultKind) -> JSONResponse:
-    """Map an upstream result kind to the pinned client-facing error shape."""
-    if kind is ResultKind.AUTH_EXPIRED:
-        return JSONResponse(status_code=401, content={"error": "AUTH_EXPIRED"})
-    if kind in (ResultKind.NO_DATA, ResultKind.EMPTY):
-        return JSONResponse(status_code=404, content={"error": "NO_DATA"})
-    return JSONResponse(status_code=502, content={"error": "UPSTREAM_ERROR"})
-
-
 async def _upstream_post(
     http: httpx.AsyncClient, url: str, headers: dict, body: dict
 ) -> httpx.Response | None:
@@ -306,7 +305,142 @@ def _build_notes(
     return notes
 
 
+# --- flow cores (CHO-213: shared by the REST routes and the agent tools) ----
+
+async def run_contract_notes_list(
+    params: ContractNoteListRequest | dict, ctx: ToolCtx
+) -> dict | ToolError:
+    """Contract-note list core — shared by the REST route and the agent tool.
+
+    Returns the route's exact 200 body ({"notes": [...]}) on success, a
+    ToolError otherwise; never raises. Requires `ctx.contract_note_refs` —
+    each listed note's sensitive file_id is exchanged for an opaque,
+    session-bound token that only the download core can resolve.
+    """
+    params = parse_params(ContractNoteListRequest, params)
+    if isinstance(params, ToolError):
+        return params
+    store = ctx.contract_note_refs
+    if store is None:
+        return ToolError(
+            CODE_UPSTREAM_ERROR, "contract-note reference store not configured"
+        )
+
+    # IDOR defense: client_id comes ONLY from the session (ctx.client_code ==
+    # X-User-Id), never from the params.
+    upstream_body = {
+        "client_id": ctx.client_code,
+        "from_date": params.fromDate,
+        "to_date": params.toDate,
+    }
+    headers = {
+        "authorization": ctx.session_id,  # Go list endpoint: raw SessionId
+        "from": config.finx_from_header(),
+        "content-type": "application/json",
+    }
+
+    resp = await _upstream_post(
+        ctx.http_client, _contract_list_url(), headers, upstream_body
+    )
+    if resp is None:
+        return tool_error_from_kind(ResultKind.UPSTREAM_ERROR)
+
+    result = map_response(resp, _CONTRACT_LIST_SPEC)
+    # "No notes for this range" is not an error — 204 (documented) and a body
+    # no-data status both collapse to an empty list the frontend renders plainly.
+    if result.kind in (ResultKind.EMPTY, ResultKind.NO_DATA):
+        return {"notes": []}
+    if result.kind is not ResultKind.OK:
+        return tool_error_from_kind(result.kind)
+
+    payload_body = (result.payload or {}).get("Body") or {}
+    raw_notes = payload_body.get("contractNotes") if isinstance(payload_body, dict) else None
+    notes = _build_notes(raw_notes, session_id=ctx.session_id, store=store)
+    return {"notes": notes}
+
+
+async def run_contract_notes_download(
+    params: ContractNoteDownloadRequest | dict, ctx: ToolCtx
+) -> dict | ToolError:
+    """Contract-note download core — shared by the REST route and the agent tool.
+
+    `params.id` is the opaque token minted by the list core, resolved
+    server-side (session-bound) to the sensitive file_id. Delivery is via
+    fileToken through the shared FileTokenStore — never file bytes, never the
+    upstream file_id. Never raises.
+    """
+    params = parse_params(ContractNoteDownloadRequest, params)
+    if isinstance(params, ToolError):
+        return params
+    store = ctx.contract_note_refs
+    if store is None:
+        return ToolError(
+            CODE_UPSTREAM_ERROR, "contract-note reference store not configured"
+        )
+
+    # Resolve the opaque token → sensitive file_id, session-bound. Unknown or
+    # expired tokens are indistinguishable and map to "no data".
+    ref = store.get(params.id, session_id=ctx.session_id)
+    if ref is None:
+        return tool_error_from_kind(ResultKind.NO_DATA)
+
+    # IDOR defense: client_code from the session; file_id resolved server-side
+    # from the session-bound token — neither is trusted from the params.
+    upstream_body = {"client_code": ctx.client_code, "file_id": ref.file_id}
+    headers = {
+        "authorization": f"Session {ctx.session_id}",  # note the "Session " prefix
+        "content-type": "application/json",
+    }
+
+    resp = await _upstream_post(
+        ctx.http_client, _contract_download_url(), headers, upstream_body
+    )
+    if resp is None:
+        return tool_error_from_kind(ResultKind.UPSTREAM_ERROR)
+    if resp.status_code == 401:
+        return tool_error_from_kind(ResultKind.AUTH_EXPIRED)
+    if not 200 <= resp.status_code < 300 or not resp.content:
+        return tool_error_from_kind(ResultKind.UPSTREAM_ERROR)
+    if ctx.report_files is None:
+        return ToolError(CODE_UPSTREAM_ERROR, "report file store not configured")
+
+    # Raw PDF bytes (no JSON envelope, no signed URL) — hand back an opaque,
+    # session-bound token via the shared FileTokenStore and reuse the shared
+    # GET /api/report/file/{token} download endpoint.
+    filename = f"Contract_Note_{ref.filename_date}.pdf"
+    token = ctx.report_files.put(
+        data=resp.content,
+        filename=filename,
+        content_type="application/pdf",
+        session_id=ctx.session_id,
+    )
+    return {
+        "delivery": "download",
+        "file": {
+            "name": filename,
+            "sizeLabel": size_label(len(resp.content)),
+            "format": "PDF",
+            "passwordProtected": False,  # contract notes are not PAN-protected
+        },
+        "fileToken": token,
+    }
+
+
 # --- routes ------------------------------------------------------------------
+
+def _request_ctx(
+    request: Request, *, session_id: str, sso_jwt: str, client_code: str
+) -> ToolCtx:
+    """ToolCtx for a contract-notes route: app resources + session credentials."""
+    return ToolCtx(
+        session_id=session_id,
+        sso_jwt=sso_jwt,
+        client_code=client_code,
+        http_client=request.app.state.http_client,
+        report_files=request.app.state.report_files,
+        contract_note_refs=_ref_store(request),
+    )
+
 
 @router.post("/api/report/contract-notes/list")
 async def contract_notes_list(
@@ -319,38 +453,16 @@ async def contract_notes_list(
     if not authorization or not x_session_id or not x_user_id:
         return _missing_credentials()
 
-    # IDOR defense: client_id comes ONLY from the session header, never the body.
-    upstream_body = {
-        "client_id": x_user_id,
-        "from_date": body.fromDate,
-        "to_date": body.toDate,
-    }
-    headers = {
-        "authorization": x_session_id,  # Go list endpoint: raw SessionId
-        "from": config.finx_from_header(),
-        "content-type": "application/json",
-    }
-
-    resp = await _upstream_post(
-        request.app.state.http_client, _contract_list_url(), headers, upstream_body
+    ctx = _request_ctx(
+        request,
+        session_id=x_session_id,
+        sso_jwt=authorization,
+        client_code=x_user_id,
     )
-    if resp is None:
-        return _error_response(ResultKind.UPSTREAM_ERROR)
-
-    result = map_response(resp, _CONTRACT_LIST_SPEC)
-    # "No notes for this range" is not an error — 204 (documented) and a body
-    # no-data status both collapse to an empty list the frontend renders plainly.
-    if result.kind in (ResultKind.EMPTY, ResultKind.NO_DATA):
-        return {"notes": []}
-    if result.kind is not ResultKind.OK:
-        return _error_response(result.kind)
-
-    payload_body = (result.payload or {}).get("Body") or {}
-    raw_notes = payload_body.get("contractNotes") if isinstance(payload_body, dict) else None
-    notes = _build_notes(
-        raw_notes, session_id=x_session_id, store=_ref_store(request)
-    )
-    return {"notes": notes}
+    result = await run_contract_notes_list(body, ctx)
+    if isinstance(result, ToolError):
+        return error_json_response(result)
+    return result
 
 
 @router.post("/api/report/contract-notes/download")
@@ -364,50 +476,13 @@ async def contract_notes_download(
     if not authorization or not x_session_id or not x_user_id:
         return _missing_credentials()
 
-    # Resolve the opaque token → sensitive file_id, session-bound. Unknown or
-    # expired tokens are indistinguishable and map to "no data".
-    ref = _ref_store(request).get(body.id, session_id=x_session_id)
-    if ref is None:
-        return _error_response(ResultKind.NO_DATA)
-
-    # IDOR defense: client_code from the session header; file_id resolved
-    # server-side from the session-bound token — neither is trusted from the body.
-    upstream_body = {"client_code": x_user_id, "file_id": ref.file_id}
-    headers = {
-        "authorization": f"Session {x_session_id}",  # note the "Session " prefix
-        "content-type": "application/json",
-    }
-
-    resp = await _upstream_post(
-        request.app.state.http_client,
-        _contract_download_url(),
-        headers,
-        upstream_body,
-    )
-    if resp is None:
-        return _error_response(ResultKind.UPSTREAM_ERROR)
-    if resp.status_code == 401:
-        return _error_response(ResultKind.AUTH_EXPIRED)
-    if not 200 <= resp.status_code < 300 or not resp.content:
-        return _error_response(ResultKind.UPSTREAM_ERROR)
-
-    # Raw PDF bytes (no JSON envelope, no signed URL) — hand back an opaque,
-    # session-bound token via the shared FileTokenStore and reuse the shared
-    # GET /api/report/file/{token} download endpoint.
-    filename = f"Contract_Note_{ref.filename_date}.pdf"
-    token = request.app.state.report_files.put(
-        data=resp.content,
-        filename=filename,
-        content_type="application/pdf",
+    ctx = _request_ctx(
+        request,
         session_id=x_session_id,
+        sso_jwt=authorization,
+        client_code=x_user_id,
     )
-    return {
-        "delivery": "download",
-        "file": {
-            "name": filename,
-            "sizeLabel": size_label(len(resp.content)),
-            "format": "PDF",
-            "passwordProtected": False,  # contract notes are not PAN-protected
-        },
-        "fileToken": token,
-    }
+    result = await run_contract_notes_download(body, ctx)
+    if isinstance(result, ToolError):
+        return error_json_response(result)
+    return result

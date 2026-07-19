@@ -35,12 +35,13 @@ import logging
 
 from fastapi import APIRouter, Header, Request
 
-from app.data.envelope import (
-    KIND_EMPTY,
-    KIND_OK,
-    error_response,
-    missing_credentials,
+from app.agent.ctx import (
+    ToolCtx,
+    ToolError,
+    error_json_response,
+    tool_error_from_kind,
 )
+from app.data.envelope import KIND_EMPTY, KIND_OK, missing_credentials
 from app.data.normalize import (
     STATUS_SUCCESS,
     blank_to_none,
@@ -196,35 +197,38 @@ def _landed_totals(txns: list[dict]) -> dict[str, float]:
     return {"in": _sum("in"), "out": _sum("out")}
 
 
-def _both_failed_response(pay_in: UpstreamResult, pay_out: UpstreamResult):
+def _both_failed_error(
+    pay_in: UpstreamResult, pay_out: UpstreamResult
+) -> ToolError:
+    """AUTH_EXPIRED wins over UPSTREAM_ERROR when both directions failed."""
     if ResultKind.AUTH_EXPIRED in (pay_in.kind, pay_out.kind):
-        return error_response(ResultKind.AUTH_EXPIRED)
-    return error_response(ResultKind.UPSTREAM_ERROR)
+        return tool_error_from_kind(ResultKind.AUTH_EXPIRED)
+    return tool_error_from_kind(ResultKind.UPSTREAM_ERROR)
 
 
-@router.post("/api/data/money")
-async def money(
-    request: Request,
-    authorization: str | None = Header(default=None),
-    x_session_id: str | None = Header(default=None),
-    x_user_id: str | None = Header(default=None),
-):
-    if not authorization or not x_session_id or not x_user_id:
-        return missing_credentials()
+async def run_money(params: dict | None, ctx: ToolCtx) -> dict | ToolError:
+    """Money (pay-in/pay-out passbook) core — shared by route and agent tool.
 
-    upstream_body = _txn_report_body(x_user_id)
-    finx = FinxClient(request.app.state.http_client)
+    Zero-slot: `params` is ignored; the period is FY-to-date by design.
+    Returns the route's exact 200 body on success (including the `partial`
+    one-direction-degraded shape), a ToolError otherwise; never raises. The
+    txn stream is field-whitelisted with masked bank destinations.
+    """
+    del params  # zero-slot: no user-intent fields exist for this flow
+
+    upstream_body = _txn_report_body(ctx.client_code)
+    finx = FinxClient(ctx.http_client)
     pay_in, pay_out = await asyncio.gather(
         finx.call(
             Endpoint.PAYIN,
-            session_id=x_session_id,
-            sso_jwt=authorization,
+            session_id=ctx.session_id,
+            sso_jwt=ctx.sso_jwt,
             body=upstream_body,
         ),
         finx.call(
             Endpoint.PAYOUT,
-            session_id=x_session_id,
-            sso_jwt=authorization,
+            session_id=ctx.session_id,
+            sso_jwt=ctx.sso_jwt,
             body=upstream_body,
         ),
     )
@@ -232,7 +236,7 @@ async def money(
     in_usable = pay_in.kind in _USABLE_KINDS
     out_usable = pay_out.kind in _USABLE_KINDS
     if not in_usable and not out_usable:
-        return _both_failed_response(pay_in, pay_out)
+        return _both_failed_error(pay_in, pay_out)
     partial = not (in_usable and out_usable)
 
     raw_in, total_in = _extract_txns(pay_in, "PayInTxn")
@@ -252,3 +256,25 @@ async def money(
     if partial:
         payload["partial"] = True
     return payload
+
+
+@router.post("/api/data/money")
+async def money(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    x_session_id: str | None = Header(default=None),
+    x_user_id: str | None = Header(default=None),
+):
+    if not authorization or not x_session_id or not x_user_id:
+        return missing_credentials()
+
+    ctx = ToolCtx(
+        session_id=x_session_id,
+        sso_jwt=authorization,
+        client_code=x_user_id,
+        http_client=request.app.state.http_client,
+    )
+    result = await run_money(None, ctx)
+    if isinstance(result, ToolError):
+        return error_json_response(result)
+    return result

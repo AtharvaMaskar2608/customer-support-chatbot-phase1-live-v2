@@ -90,11 +90,10 @@ function isTotals(x: unknown): x is HoldingsTotals {
   return hasFiniteNumbers(x as Record<string, unknown>, TOTALS_NUMBER_KEYS)
 }
 
-export async function fetchHoldings(session: SessionContext): Promise<HoldingsResult> {
-  const envelope = await postData('/api/data/holdings', session)
-  if (envelope.kind !== 'ok') return envelope
-
-  const { asOf, rows, totals } = envelope.body
+/** Validate + normalize an `ok` payload body. Shared by the flow fetch and
+ *  the agent's data artifacts (CHO-213) — both render the same card. */
+export function parseHoldingsPayload(body: Record<string, unknown>): HoldingsResult {
+  const { asOf, rows, totals } = body
   if (typeof asOf !== 'string' || !Array.isArray(rows) || !isTotals(totals)) {
     return { kind: 'error', code: 'upstream_error' }
   }
@@ -109,4 +108,10 @@ export async function fetchHoldings(session: SessionContext): Promise<HoldingsRe
       totals,
     },
   }
+}
+
+export async function fetchHoldings(session: SessionContext): Promise<HoldingsResult> {
+  const envelope = await postData('/api/data/holdings', session)
+  if (envelope.kind !== 'ok') return envelope
+  return parseHoldingsPayload(envelope.body)
 }

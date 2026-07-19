@@ -11,6 +11,8 @@ import httpx
 from fastapi import FastAPI
 
 from app import config
+from app.agent.router import router as chat_router
+from app.agent.store import ThreadStore
 from app.data.brokerage import router as brokerage_router
 from app.data.holdings import router as holdings_router
 from app.data.money import router as money_router
@@ -52,9 +54,16 @@ async def lifespan(app: FastAPI):
                 )
             except (OSError, asyncpg.PostgresError) as exc:
                 logger.warning("KB pool unavailable: %s", type(exc).__name__)
+        # Conversation store (CHO-213): in-memory authoritative thread cache
+        # persisted by a single background writer over the shared pool. With
+        # pg_pool=None it runs memory-only (chat works, persistence off).
+        app.state.conversation_store = ThreadStore(pool=app.state.pg_pool)
+        await app.state.conversation_store.start()
         try:
             yield
         finally:
+            # Drain queued conversation writes BEFORE the pool goes away.
+            await app.state.conversation_store.close()
             if app.state.pg_pool is not None:
                 await app.state.pg_pool.close()
 
@@ -90,6 +99,8 @@ def create_app() -> FastAPI:
     app.include_router(money_router)
     app.include_router(brokerage_router)
     app.include_router(kb_router)
+    # CHO-213 agentic loop: free text → tool-orchestrated SSE chat.
+    app.include_router(chat_router)
     return app
 
 

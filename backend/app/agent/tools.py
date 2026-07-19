@@ -1,0 +1,360 @@
+"""Agent tool registry + dispatcher (CHO-213 · tasks 2.1/2.2, design D2/D3).
+
+Each entry maps a tool name to (JSON schema of USER-INTENT parameters only,
+async handler). Handlers are the exact flow cores the REST routes call —
+never duplicated, never invoked over HTTP — so both entry points produce the
+same normalized envelope. Schemas carry NO credential fields (SessionId, SSO
+JWT, client code, ...): credentials travel only in the per-request `ToolCtx`,
+so the model has no field to redirect identity through (the structural IDOR
+defense from D3).
+
+The spec's "8 capabilities" map to 9 tool entries: contract notes is a
+two-step chain (list → download), mirrored as two tools over its two cores.
+
+Dispatch contract (task 2.2):
+  - unknown tool          -> is_error, "unknown tool ..."
+  - core ToolError        -> is_error with the core's actionable message
+  - unexpected exception  -> caught; is_error with a generic message
+                             (log carries the exception TYPE only)
+  - success               -> compact sorted-key JSON of the envelope
+Duration is measured per call and returned for the tool_result meta.
+"""
+
+import json
+import logging
+import time
+from dataclasses import dataclass
+from typing import Any, Awaitable, Callable
+
+from app.agent.ctx import ToolCtx, ToolError
+from app.data.brokerage import run_brokerage
+from app.data.holdings import run_holdings
+from app.data.money import run_money
+from app.kb.router import run_kb_search
+from app.report import run_pnl
+from app.reports.contract_notes import (
+    run_contract_notes_download,
+    run_contract_notes_list,
+)
+from app.reports.ledger import run_ledger
+from app.reports.tax import run_tax
+
+logger = logging.getLogger("app.agent.tools")
+
+Handler = Callable[[Any, ToolCtx], Awaitable[dict | ToolError]]
+
+_DATE = {"type": "string", "description": "Date in YYYY-MM-DD format."}
+_DELIVERY = {
+    "type": "string",
+    "enum": ["download", "email"],
+    "description": (
+        "How the report is delivered: 'download' (in-chat file) or 'email' "
+        "(sent to the registered email)."
+    ),
+}
+
+# Zero-slot flows: no user-intent parameters exist at all.
+_EMPTY_SCHEMA = {
+    "type": "object",
+    "properties": {},
+    "required": [],
+    "additionalProperties": False,
+}
+
+
+@dataclass
+class Tool:
+    name: str
+    description: str
+    schema: dict
+    handler: Handler
+
+
+async def _run_tax_fy(params: Any, ctx: ToolCtx) -> dict | ToolError:
+    """Adapter: the tool exposes `fy` (user intent); the core model expects
+    `finYear`. Everything else passes through untouched."""
+    if isinstance(params, dict) and "fy" in params:
+        remapped = dict(params)  # never mutate the stored tool_use input
+        remapped["finYear"] = remapped.pop("fy")
+        params = remapped
+    return await run_tax(params, ctx)
+
+
+_TOOL_LIST = [
+    Tool(
+        name="get_pnl_report",
+        description=(
+            "Generate the client's Profit & Loss (P&L) statement for one "
+            "trading segment over a date range, as a password-protected PDF "
+            "(download or email). Call this when the user asks for their "
+            "P&L, profit/loss statement, or realized trading performance. "
+            "All four parameters are required — ask the user for any value "
+            "they have not stated."
+        ),
+        schema={
+            "type": "object",
+            "properties": {
+                "segment": {
+                    "type": "string",
+                    "enum": ["Equity", "F&O", "Commodity"],
+                    "description": "Trading segment the P&L covers.",
+                },
+                "fromDate": _DATE,
+                "toDate": _DATE,
+                "delivery": _DELIVERY,
+            },
+            "required": ["segment", "fromDate", "toDate", "delivery"],
+            "additionalProperties": False,
+        },
+        handler=run_pnl,
+    ),
+    Tool(
+        name="get_ledger_report",
+        description=(
+            "Generate the client's ledger (account statement of debits and "
+            "credits) for the Normal or MTF book over a date range, as a "
+            "password-protected PDF (download or email). Call this when the "
+            "user asks for their ledger, account statement, or fund "
+            "debit/credit history. All four parameters are required."
+        ),
+        schema={
+            "type": "object",
+            "properties": {
+                "book": {
+                    "type": "string",
+                    "enum": ["Normal", "MTF"],
+                    "description": (
+                        "Ledger book: 'Normal' (regular trading account) or "
+                        "'MTF' (Margin Trading Facility)."
+                    ),
+                },
+                "fromDate": _DATE,
+                "toDate": _DATE,
+                "delivery": _DELIVERY,
+            },
+            "required": ["book", "fromDate", "toDate", "delivery"],
+            "additionalProperties": False,
+        },
+        handler=run_ledger,
+    ),
+    Tool(
+        name="get_capital_gains_report",
+        description=(
+            "Generate the client's capital gains (tax) report for one "
+            "financial year, as PDF or Excel (download or email). Call this "
+            "when the user asks for capital gains, their tax report, or "
+            "documents for ITR filing. All three parameters are required."
+        ),
+        schema={
+            "type": "object",
+            "properties": {
+                "fy": {
+                    "type": "string",
+                    "description": (
+                        "Financial year span in YYYY-YYYY format, e.g. "
+                        "'2025-2026' for FY starting April 2025."
+                    ),
+                },
+                "format": {
+                    "type": "string",
+                    "enum": ["PDF", "Excel"],
+                    "description": "Report file format.",
+                },
+                "delivery": _DELIVERY,
+            },
+            "required": ["fy", "format", "delivery"],
+            "additionalProperties": False,
+        },
+        handler=_run_tax_fy,
+    ),
+    Tool(
+        name="list_contract_notes",
+        description=(
+            "List the client's contract notes (trade confirmations) over a "
+            "date range. ALWAYS call this first when the user wants a "
+            "contract note — it returns the note ids that "
+            "download_contract_note requires. Both dates are required."
+        ),
+        schema={
+            "type": "object",
+            "properties": {
+                "fromDate": _DATE,
+                "toDate": _DATE,
+            },
+            "required": ["fromDate", "toDate"],
+            "additionalProperties": False,
+        },
+        handler=run_contract_notes_list,
+    ),
+    Tool(
+        name="download_contract_note",
+        description=(
+            "Download one contract note as a PDF. `id` MUST be a note id "
+            "returned by list_contract_notes earlier in this conversation — "
+            "never invent or guess an id. Call list_contract_notes first if "
+            "you do not have one."
+        ),
+        schema={
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": (
+                        "Opaque note id from a list_contract_notes result."
+                    ),
+                },
+            },
+            "required": ["id"],
+            "additionalProperties": False,
+        },
+        handler=run_contract_notes_download,
+    ),
+    Tool(
+        name="get_holdings",
+        description=(
+            "Fetch the client's current stock holdings (portfolio) with live "
+            "valuations, invested value, P&L, and day change. Call this when "
+            "the user asks what they hold, their portfolio value, or how "
+            "their investments are doing. Takes no parameters."
+        ),
+        schema=_EMPTY_SCHEMA,
+        handler=run_holdings,
+    ),
+    Tool(
+        name="get_money_transactions",
+        description=(
+            "Fetch the client's money movements — pay-in (deposits) and "
+            "pay-out (withdrawals) — for the current financial year, as one "
+            "merged passbook. Call this when the user asks about funds "
+            "added, withdrawals, transfer status, or missing money. Takes "
+            "no parameters."
+        ),
+        schema=_EMPTY_SCHEMA,
+        handler=run_money,
+    ),
+    Tool(
+        name="get_brokerage_rates",
+        description=(
+            "Fetch the client's personalized brokerage rate card (charges "
+            "per segment and order type). Call this when the user asks what "
+            "brokerage or charges they pay. Takes no parameters. For "
+            "questions about what a charge MEANS, prefer "
+            "search_knowledge_base."
+        ),
+        schema=_EMPTY_SCHEMA,
+        handler=run_brokerage,
+    ),
+    Tool(
+        name="search_knowledge_base",
+        description=(
+            "Search Choice's support knowledge base for factual answers "
+            "about products, processes, charges, and how-tos (e.g. account "
+            "opening, fund transfer steps, what a term means). Call this for "
+            "general questions that are NOT about the client's own account "
+            "data. Summarize the results in your own words."
+        ),
+        schema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query, in plain language.",
+                },
+                "top_k": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 20,
+                    "description": "How many results to return (default 5).",
+                },
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+        handler=run_kb_search,
+    ),
+]
+
+
+TOOLS: dict[str, Tool] = {tool.name: tool for tool in _TOOL_LIST}
+
+
+def tool_schemas() -> list[dict]:
+    """The Anthropic-facing tool definitions, in stable registry order (the
+    order is part of the prompt-cache prefix — never reorder per request)."""
+    return [
+        {
+            "name": tool.name,
+            "description": tool.description,
+            "input_schema": tool.schema,
+        }
+        for tool in _TOOL_LIST
+    ]
+
+
+# --- dispatch ----------------------------------------------------------------
+
+_UNEXPECTED_FAILURE_MESSAGE = (
+    "The tool failed unexpectedly — apologize briefly and suggest trying "
+    "again in a moment."
+)
+
+
+@dataclass
+class DispatchOutcome:
+    """One tool execution, loop-facing.
+
+    `content` is what goes into the tool_result block; `envelope` is the
+    parsed success envelope (for artifact events); `error_code` is the
+    ToolError code (for AUTH_EXPIRED passthrough)."""
+
+    content: str
+    is_error: bool
+    duration_ms: int
+    envelope: dict | None = None
+    error_code: str | None = None
+
+
+async def dispatch_outcome(
+    name: str, tool_input: Any, ctx: ToolCtx
+) -> DispatchOutcome:
+    """Resolve name → handler(input, ctx); never raises across this boundary."""
+    started = time.perf_counter()
+
+    def _ms() -> int:
+        return int((time.perf_counter() - started) * 1000)
+
+    tool = TOOLS.get(name)
+    if tool is None:
+        return DispatchOutcome(
+            content=f"unknown tool: {name}", is_error=True, duration_ms=_ms()
+        )
+    try:
+        result = await tool.handler(tool_input, ctx)
+    except Exception as exc:  # cores never raise — this is the last-resort net
+        logger.warning(
+            "agent tool failed tool=%s error=%s", name, type(exc).__name__
+        )
+        return DispatchOutcome(
+            content=_UNEXPECTED_FAILURE_MESSAGE, is_error=True, duration_ms=_ms()
+        )
+    if isinstance(result, ToolError):
+        return DispatchOutcome(
+            content=result.message,
+            is_error=True,
+            duration_ms=_ms(),
+            error_code=result.code,
+        )
+    return DispatchOutcome(
+        content=json.dumps(result, sort_keys=True, separators=(",", ":")),
+        is_error=False,
+        duration_ms=_ms(),
+        envelope=result,
+    )
+
+
+async def dispatch(
+    name: str, tool_input: Any, ctx: ToolCtx
+) -> tuple[str, bool, int]:
+    """(content, is_error, duration_ms) — the task-2.2 dispatcher surface."""
+    outcome = await dispatch_outcome(name, tool_input, ctx)
+    return outcome.content, outcome.is_error, outcome.duration_ms

@@ -13,6 +13,14 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from app.agent.ctx import (
+    CODE_KB_ERROR,
+    CODE_KB_UNAVAILABLE,
+    CODE_VALIDATION,
+    ToolCtx,
+    ToolError,
+    parse_params,
+)
 from app.kb.embed import embed_query
 from app.kb.search import hybrid_search
 
@@ -26,23 +34,49 @@ class KbSearchRequest(BaseModel):
     top_k: int = Field(default=5, ge=1, le=20)
 
 
-@router.post("/api/kb/search")
-async def kb_search(request: Request, body: KbSearchRequest):
-    pool = getattr(request.app.state, "pg_pool", None)
-    if pool is None:
-        return JSONResponse(status_code=503, content={"error": "KB_UNAVAILABLE"})
+async def run_kb_search(
+    params: KbSearchRequest | dict, ctx: ToolCtx
+) -> dict | ToolError:
+    """KB hybrid-search core — shared by the REST route and the agent tool.
 
-    query = body.query.strip()
+    Uses `ctx.pg_pool` (None is the degraded KB_UNAVAILABLE outcome) and
+    `ctx.http_client` for query embedding; an embedding failure degrades to
+    FTS-only retrieval and marks the envelope `degraded: "fts_only"` — exactly
+    as the route always has. Returns the route's exact 200 body on success, a
+    ToolError otherwise; never raises. Logs never contain the query text.
+    """
+    params = parse_params(KbSearchRequest, params)
+    if isinstance(params, ToolError):
+        return params
+
+    if ctx.pg_pool is None:
+        return ToolError(
+            code=CODE_KB_UNAVAILABLE,
+            message=(
+                "The knowledge base is unavailable right now — answer without "
+                "it or suggest trying again later."
+            ),
+        )
+
+    query = params.query.strip()
     if not query:
-        return JSONResponse(status_code=422, content={"error": "EMPTY_QUERY"})
+        return ToolError(
+            code=CODE_VALIDATION,
+            message="query must be non-empty — ask the user.",
+        )
 
     started = time.monotonic()
-    embedding = await embed_query(request.app.state.http_client, query)
+    embedding = await embed_query(ctx.http_client, query)
     try:
-        results = await hybrid_search(pool, query, embedding, body.top_k)
+        results = await hybrid_search(ctx.pg_pool, query, embedding, params.top_k)
     except Exception:
         logger.exception("kb search failed (len=%s)", len(query))
-        return JSONResponse(status_code=502, content={"error": "KB_ERROR"})
+        return ToolError(
+            code=CODE_KB_ERROR,
+            message=(
+                "Knowledge-base search failed — try again or answer without it."
+            ),
+        )
 
     elapsed_ms = round((time.monotonic() - started) * 1000)
     logger.info(
@@ -56,3 +90,29 @@ async def kb_search(request: Request, body: KbSearchRequest):
     if embedding is None:
         payload["degraded"] = "fts_only"
     return payload
+
+
+# Route-shell mapping of ToolError codes back to the pinned KB error shapes.
+# VALIDATION here can only be the whitespace-only query (pydantic min_length
+# rejects an empty string at the FastAPI layer first) — the route's 422.
+_KB_ERROR_RESPONSES = {
+    CODE_KB_UNAVAILABLE: (503, "KB_UNAVAILABLE"),
+    CODE_VALIDATION: (422, "EMPTY_QUERY"),
+    CODE_KB_ERROR: (502, "KB_ERROR"),
+}
+
+
+@router.post("/api/kb/search")
+async def kb_search(request: Request, body: KbSearchRequest):
+    ctx = ToolCtx(
+        session_id="",  # session-free endpoint: no credentials involved
+        sso_jwt="",
+        client_code="",
+        http_client=request.app.state.http_client,
+        pg_pool=getattr(request.app.state, "pg_pool", None),
+    )
+    result = await run_kb_search(body, ctx)
+    if isinstance(result, ToolError):
+        status, error = _KB_ERROR_RESPONSES[result.code]
+        return JSONResponse(status_code=status, content={"error": error})
+    return result

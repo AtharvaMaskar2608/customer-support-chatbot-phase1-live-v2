@@ -27,6 +27,14 @@ from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from app.agent.ctx import (
+    CODE_UPSTREAM_ERROR,
+    ToolCtx,
+    ToolError,
+    error_json_response,
+    parse_params,
+    tool_error_from_kind,
+)
 from app.finx.client import FinxClient, ResultKind
 from app.finx.delivery import fetch_artifact, mask_email, size_label
 from app.finx.routing import Endpoint
@@ -100,13 +108,81 @@ def _missing_credentials() -> JSONResponse:
     return JSONResponse(status_code=400, content={"error": "MISSING_CREDENTIALS"})
 
 
-def _error_response(kind: ResultKind) -> JSONResponse:
-    """Map an upstream result kind to the pinned client-facing error shape."""
-    if kind is ResultKind.AUTH_EXPIRED:
-        return JSONResponse(status_code=401, content={"error": "AUTH_EXPIRED"})
-    if kind in (ResultKind.NO_DATA, ResultKind.EMPTY):
-        return JSONResponse(status_code=404, content={"error": "NO_DATA"})
-    return JSONResponse(status_code=502, content={"error": "UPSTREAM_ERROR"})
+async def run_tax(
+    params: TaxReportRequest | dict, ctx: ToolCtx
+) -> dict | ToolError:
+    """Tax flow core — shared by the REST route and the agent tool (CHO-213).
+
+    Same contract as `report.run_pnl`: exact route 200 body on success,
+    ToolError otherwise, never raises, download delivery via fileToken only.
+    The Tax-only RequestFor/FileFormat traps stay encoded here.
+    """
+    params = parse_params(TaxReportRequest, params)
+    if isinstance(params, ToolError):
+        return params
+
+    # Session-bound: client code comes ONLY from the authenticated session
+    # (ctx.client_code == X-User-Id), never from the params.
+    client_code = ctx.client_code
+    fmt = _FORMAT_SPEC[params.format]
+    is_email = params.delivery == "email"
+    request_for = _TAX_REQUESTFOR_EMAIL if is_email else _TAX_REQUESTFOR_DOWNLOAD
+
+    upstream_body = {
+        "ClientId": client_code,
+        "FinYear": params.finYear,
+        "RequestFor": request_for,
+        "FileFormat": fmt["file_format"],
+        "SessionId": ctx.session_id,
+    }
+
+    finx = FinxClient(ctx.http_client)
+    result = await finx.call(
+        Endpoint.TAX,
+        session_id=ctx.session_id,
+        sso_jwt=ctx.sso_jwt,
+        body=upstream_body,
+    )
+    if result.kind is not ResultKind.OK:
+        return tool_error_from_kind(result.kind)
+
+    response_value = (result.payload or {}).get("Response")
+
+    if is_email:
+        # Never surface the raw confirmation string — mask before returning.
+        return {"delivery": "email", "emailMasked": mask_email(response_value)}
+
+    # Download: response_value is a report URL string. Fetch it server-side and
+    # hand back only an opaque token — the URL never reaches the client or logs.
+    if not isinstance(response_value, str) or not response_value.startswith(
+        "http"
+    ):
+        return tool_error_from_kind(ResultKind.UPSTREAM_ERROR)
+    if ctx.report_files is None:
+        return ToolError(CODE_UPSTREAM_ERROR, "report file store not configured")
+
+    data = await fetch_artifact(ctx.http_client, response_value)
+    if data is None:
+        return tool_error_from_kind(ResultKind.UPSTREAM_ERROR)
+
+    # Filename extension follows the chosen format: .pdf for PDF, .xlsx for Excel.
+    filename = f"CapitalGains_{params.finYear}.{fmt['ext']}"
+    token = ctx.report_files.put(
+        data=data,
+        filename=filename,
+        content_type=fmt["content_type"],
+        session_id=ctx.session_id,
+    )
+    return {
+        "delivery": "download",
+        "file": {
+            "name": filename,
+            "sizeLabel": size_label(len(data)),
+            "format": params.format,  # "PDF" | "Excel" — the chosen format
+            "passwordProtected": True,  # delivered file is PAN-password-protected
+        },
+        "fileToken": token,
+    }
 
 
 @router.post("/api/report/tax")
@@ -120,63 +196,14 @@ async def tax_report(
     if not authorization or not x_session_id or not x_user_id:
         return _missing_credentials()
 
-    # Session-bound: client code comes ONLY from the authenticated session
-    # (X-User-Id), never from the request body.
-    client_code = x_user_id
-    fmt = _FORMAT_SPEC[body.format]
-    is_email = body.delivery == "email"
-    request_for = _TAX_REQUESTFOR_EMAIL if is_email else _TAX_REQUESTFOR_DOWNLOAD
-
-    upstream_body = {
-        "ClientId": client_code,
-        "FinYear": body.finYear,
-        "RequestFor": request_for,
-        "FileFormat": fmt["file_format"],
-        "SessionId": x_session_id,
-    }
-
-    finx = FinxClient(request.app.state.http_client)
-    result = await finx.call(
-        Endpoint.TAX,
+    ctx = ToolCtx(
         session_id=x_session_id,
         sso_jwt=authorization,
-        body=upstream_body,
+        client_code=x_user_id,
+        http_client=request.app.state.http_client,
+        report_files=request.app.state.report_files,
     )
-    if result.kind is not ResultKind.OK:
-        return _error_response(result.kind)
-
-    response_value = (result.payload or {}).get("Response")
-
-    if is_email:
-        # Never surface the raw confirmation string — mask before returning.
-        return {"delivery": "email", "emailMasked": mask_email(response_value)}
-
-    # Download: response_value is a report URL string. Fetch it server-side and
-    # hand back only an opaque token — the URL never reaches the client or logs.
-    if not isinstance(response_value, str) or not response_value.startswith(
-        "http"
-    ):
-        return _error_response(ResultKind.UPSTREAM_ERROR)
-
-    data = await fetch_artifact(request.app.state.http_client, response_value)
-    if data is None:
-        return _error_response(ResultKind.UPSTREAM_ERROR)
-
-    # Filename extension follows the chosen format: .pdf for PDF, .xlsx for Excel.
-    filename = f"CapitalGains_{body.finYear}.{fmt['ext']}"
-    token = request.app.state.report_files.put(
-        data=data,
-        filename=filename,
-        content_type=fmt["content_type"],
-        session_id=x_session_id,
-    )
-    return {
-        "delivery": "download",
-        "file": {
-            "name": filename,
-            "sizeLabel": size_label(len(data)),
-            "format": body.format,  # "PDF" | "Excel" — the chosen format
-            "passwordProtected": True,  # delivered file is PAN-password-protected
-        },
-        "fileToken": token,
-    }
+    result = await run_tax(body, ctx)
+    if isinstance(result, ToolError):
+        return error_json_response(result)
+    return result
