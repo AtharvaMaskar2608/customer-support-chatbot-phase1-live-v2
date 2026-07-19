@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
 from app.agent.ctx import ToolCtx, ToolError
+from app.agent.forms import run_open_report_form
 from app.data.brokerage import run_brokerage
 from app.data.holdings import run_holdings
 from app.data.money import run_money
@@ -82,14 +83,70 @@ async def _run_tax_fy(params: Any, ctx: ToolCtx) -> dict | ToolError:
 
 _TOOL_LIST = [
     Tool(
+        name="open_report_form",
+        description=(
+            "Open a guided report form in the chat, pre-filled with the "
+            "values the user has stated. THIS is how report requests with "
+            "missing parameters are handled — never ask for report "
+            "parameters in a text question. Pass only values the user "
+            "actually said (resolve relative dates to YYYY-MM-DD first); "
+            "pass nothing beyond `flow` when they gave no details. The "
+            "widget asks for whatever is missing."
+        ),
+        schema={
+            "type": "object",
+            "properties": {
+                "flow": {
+                    "type": "string",
+                    "enum": ["pnl", "ledger", "tax", "contract-notes"],
+                    "description": (
+                        "Which report form to open: pnl (P&L statement), "
+                        "ledger (account statement), tax (capital gains), "
+                        "contract-notes (trade confirmations)."
+                    ),
+                },
+                "segment": {
+                    "type": "string",
+                    "enum": ["Equity", "F&O", "Commodity"],
+                    "description": "P&L only: trading segment, if stated.",
+                },
+                "book": {
+                    "type": "string",
+                    "enum": ["Normal", "MTF"],
+                    "description": "Ledger only: ledger book, if stated.",
+                },
+                "fy": {
+                    "type": "string",
+                    "description": (
+                        "Tax only: financial year as YYYY-YYYY (e.g. "
+                        "'2025-2026'), if stated."
+                    ),
+                },
+                "format": {
+                    "type": "string",
+                    "enum": ["PDF", "Excel"],
+                    "description": "Tax only: file format, if stated.",
+                },
+                "fromDate": _DATE,
+                "toDate": _DATE,
+                "delivery": _DELIVERY,
+            },
+            "required": ["flow"],
+            "additionalProperties": False,
+        },
+        handler=run_open_report_form,
+    ),
+    Tool(
         name="get_pnl_report",
         description=(
             "Generate the client's Profit & Loss (P&L) statement for one "
             "trading segment over a date range, as a password-protected PDF "
             "(download or email). Call this when the user asks for their "
             "P&L, profit/loss statement, or realized trading performance. "
-            "All four parameters are required — ask the user for any value "
-            "they have not stated."
+            "All four parameters are required — call this ONLY when every "
+            "one of them is explicitly known (from the user's words or a "
+            "completed form earlier in this conversation); otherwise call "
+            "open_report_form instead."
         ),
         schema={
             "type": "object",
@@ -115,7 +172,9 @@ _TOOL_LIST = [
             "credits) for the Normal or MTF book over a date range, as a "
             "password-protected PDF (download or email). Call this when the "
             "user asks for their ledger, account statement, or fund "
-            "debit/credit history. All four parameters are required."
+            "debit/credit history. All four parameters are required — call "
+            "this ONLY when every one is explicitly known; otherwise call "
+            "open_report_form instead."
         ),
         schema={
             "type": "object",
@@ -143,7 +202,9 @@ _TOOL_LIST = [
             "Generate the client's capital gains (tax) report for one "
             "financial year, as PDF or Excel (download or email). Call this "
             "when the user asks for capital gains, their tax report, or "
-            "documents for ITR filing. All three parameters are required."
+            "documents for ITR filing. All three parameters are required — "
+            "call this ONLY when every one is explicitly known; otherwise "
+            "call open_report_form instead."
         ),
         schema={
             "type": "object",

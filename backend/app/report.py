@@ -27,6 +27,7 @@ from app.agent.ctx import (
     parse_params,
     tool_error_from_kind,
 )
+from app.agent.events import friendly_range, record_flow_event
 from app.finx.client import FinxClient, ResultKind
 from app.finx.delivery import fetch_artifact, mask_email, size_label
 from app.finx.routing import Endpoint
@@ -190,6 +191,21 @@ async def pnl_report(
     result = await run_pnl(body, ctx)
     if isinstance(result, ToolError):
         return error_json_response(result)
+    # Widget completion → agent memory (CHO-214): fire-and-forget, never
+    # delays or fails this response.
+    record_flow_event(
+        request.app,
+        session_id=x_session_id,
+        client_code=x_user_id,
+        flow="pnl",
+        details=[body.segment, friendly_range(body.fromDate, body.toDate)],
+        slots={
+            "segment": body.segment,
+            "fromDate": body.fromDate,
+            "toDate": body.toDate,
+        },
+        delivery=body.delivery,
+    )
     return result
 
 

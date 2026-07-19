@@ -7,7 +7,7 @@
 import type { FileInfo, ReportErrorCode } from '../flow/api'
 import type { DataErrorCode } from '../flow/dataflow'
 import type { FlowRun } from '../flow/engine'
-import type { FilledValues, HelpKind } from '../flow/types'
+import type { DeliveryMode, FilledValues, HelpKind } from '../flow/types'
 import type { ClientNote } from './notes'
 
 let counter = 0
@@ -27,8 +27,9 @@ export type Message =
   | { id: string; kind: 'typing' }
   /** The available-actions sticker row (unmatched composer text). */
   | { id: string; kind: 'actions' }
-  /** A live slot-filling card. */
-  | { id: string; kind: 'flow'; run: FlowRun }
+  /** A live slot-filling card. `preferredDelivery` (agent-seeded flows only)
+   *  highlights the stated delivery button — the user still taps to fire. */
+  | { id: string; kind: 'flow'; run: FlowRun; preferredDelivery?: DeliveryMode }
   /** Narrated-generation pill showing the current caption. */
   | { id: string; kind: 'narrate'; caption: string }
   | {

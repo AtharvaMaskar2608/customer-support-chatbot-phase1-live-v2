@@ -537,3 +537,84 @@ def test_live_round_trip_and_cleanup():
             await pool.close()
 
     asyncio.run(scenario())
+
+
+# --- flow events enter replay (CHO-214) ---------------------------------------
+
+
+def _mem_thread():
+    store = ThreadStore()  # memory-only
+    thread = asyncio.run(store.get_thread("fe-session", client_code="X1"))
+    return store, thread
+
+
+def test_flow_event_merges_into_next_user_message():
+    store, thread = _mem_thread()
+    store.append_turn(thread, role="user", kind="user_text",
+                      content=[{"type": "text", "text": "get my P&L"}])
+    store.append_turn(thread, role="assistant", kind="assistant_text",
+                      content=[{"type": "text", "text": "Here's the form."}])
+    store.append_turn(thread, role="user", kind="flow_event",
+                      content=[{"type": "text", "text": "[App event] done: Equity"}],
+                      meta={"flow": "pnl"})
+    store.append_turn(thread, role="user", kind="user_text",
+                      content=[{"type": "text", "text": "now the same for F&O"}])
+
+    messages = thread.messages()
+    assert [m["role"] for m in messages] == ["user", "assistant", "user"]
+    merged = messages[-1]["content"]
+    assert [b["text"] for b in merged] == [
+        "[App event] done: Equity",
+        "now the same for F&O",
+    ]
+
+
+def test_flow_event_mid_tool_round_keeps_tool_results_first():
+    """A widget completing while the agent is mid-tool-round must not put a
+    text block ahead of tool_result blocks (the API requires results first)."""
+    store, thread = _mem_thread()
+    store.append_turn(thread, role="user", kind="user_text",
+                      content=[{"type": "text", "text": "hi"}])
+    store.append_turn(thread, role="assistant", kind="assistant_tool_use",
+                      content=[{"type": "tool_use", "id": "t1",
+                                "name": "search_knowledge_base", "input": {}}])
+    store.append_turn(thread, role="user", kind="flow_event",
+                      content=[{"type": "text", "text": "[App event] P&L done"}],
+                      meta={"flow": "pnl"})
+    store.append_turn(thread, role="user", kind="tool_result",
+                      content=[{"type": "tool_result", "tool_use_id": "t1",
+                                "content": "{}", "is_error": False}],
+                      meta={"tool_name": "search_knowledge_base",
+                            "is_error": False, "duration_ms": 1})
+
+    messages = thread.messages()
+    assert [m["role"] for m in messages] == ["user", "assistant", "user"]
+    merged = messages[-1]["content"]
+    assert merged[0]["type"] == "tool_result"
+    assert merged[1]["type"] == "text"
+
+
+def test_replay_without_flow_events_is_unchanged():
+    """Regression: turn sequences without flow events produce exactly the
+    pre-CHO-214 messages array (incl. the parallel tool_result merge)."""
+    store, thread = _mem_thread()
+    store.append_turn(thread, role="user", kind="user_text",
+                      content=[{"type": "text", "text": "hi"}])
+    store.append_turn(thread, role="assistant", kind="assistant_tool_use",
+                      content=[{"type": "tool_use", "id": "t1", "name": "a",
+                                "input": {}},
+                               {"type": "tool_use", "id": "t2", "name": "b",
+                                "input": {}}])
+    for tid in ("t1", "t2"):
+        store.append_turn(thread, role="user", kind="tool_result",
+                          content=[{"type": "tool_result", "tool_use_id": tid,
+                                    "content": "{}", "is_error": False}],
+                          meta={"tool_name": "x", "is_error": False,
+                                "duration_ms": 1})
+    store.append_turn(thread, role="assistant", kind="assistant_text",
+                      content=[{"type": "text", "text": "done"}])
+
+    messages = thread.messages()
+    assert [m["role"] for m in messages] == ["user", "assistant", "user",
+                                             "assistant"]
+    assert [b["tool_use_id"] for b in messages[2]["content"]] == ["t1", "t2"]

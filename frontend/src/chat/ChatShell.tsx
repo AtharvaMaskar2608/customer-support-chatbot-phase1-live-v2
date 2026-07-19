@@ -27,7 +27,7 @@ import {
   type Message,
 } from './messages'
 import { streamAgentChat, type AgentArtifact } from './agent'
-import { parseDataArtifact } from './agentArtifacts'
+import { parseDataArtifact, parseFlowArtifact } from './agentArtifacts'
 import { downloadContractNote, fetchContractNotes, type ClientNote } from './notes'
 import { EmptyState } from './EmptyState'
 import { Stickers } from './Stickers'
@@ -282,6 +282,22 @@ export function ChatShell({
         // "Email it" replays a slot-filled flow; the agent card has no slot
         // values to replay — delivery changes go back through chat instead.
         emailable: false,
+      })
+      return
+    }
+    if (artifact.kind === 'flow') {
+      // Form handover (CHO-214): boot the guided FlowCard seeded with the
+      // re-validated values; the engine asks the first unfilled gap. The
+      // agent's own streamed line is the intro — no extra bot copy here.
+      const parsed = parseFlowArtifact(artifact)
+      if (parsed === null) return
+      const descriptor = getFlow(parsed.flowKey)
+      if (!descriptor || !isLive(descriptor)) return
+      append({
+        id: nextId(),
+        kind: 'flow',
+        run: startRun(descriptor, parsed.seed),
+        preferredDelivery: parsed.preferredDelivery,
       })
       return
     }
@@ -650,6 +666,7 @@ function MessageView({
         <FlowCard
           descriptor={descriptor}
           run={m.run}
+          preferredDelivery={m.preferredDelivery}
           onPick={(slotKey, value) => onPick(m.id, descriptor, slotKey, value)}
           onEdit={(slotKey) => onEdit(m.id, slotKey)}
           onDeliver={(mode) => onDeliver(m.id, descriptor, m.run, mode)}
