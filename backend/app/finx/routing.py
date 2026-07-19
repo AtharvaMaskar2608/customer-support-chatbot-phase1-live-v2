@@ -1,10 +1,15 @@
-"""Per-endpoint routing for the FinX report backends.
+"""Per-endpoint routing for the FinX report and data backends.
 
 The credential is a function of the *backend*, not the app (design decision 3):
 
   - .NET / Go middleware report endpoints (P&L, Ledger, Tax, Contract Notes)
     authenticate with the **SessionId** in `authorization`.
   - The MIS / CML reports backend authenticates with the **SSO JWT**.
+  - CHO-211 data endpoints (live-verified 2026-07-18): Holdings takes
+    `Session <SessionId>` (prefix style, like the contract-note download);
+    Pay-In / Pay-Out take the bare **SessionId**; the Brokerage slab takes the
+    raw **SSO JWT**. Holdings' extra web-app credentials (`ssotoken`, body
+    `accessToken`, `fingerprint`) are decorative — not enforced, not sent.
 
 The `from:` header is a non-authenticating client build tag on every endpoint.
 
@@ -33,6 +38,11 @@ class Endpoint(str, Enum):
     LEDGER = "ledger"  # Wave 1
     TAX = "tax"  # Wave 1
     CML = "cml"  # Wave 1
+    # CHO-211 data-card flows.
+    HOLDINGS = "holdings"
+    PAYIN = "payin"
+    PAYOUT = "payout"
+    BROKERAGE = "brokerage"
 
 
 class AuthSource(str, Enum):
@@ -65,7 +75,7 @@ class RouteSpec:
     extra_headers: dict[str, str]
     body_shape: BodyShape
     # Prefix for the auth header value, e.g. "Session " on the contract-note
-    # download sub-call. Empty for every endpoint wired so far.
+    # download sub-call and on Holdings. Empty everywhere else.
     auth_prefix: str = ""
 
 
@@ -129,5 +139,40 @@ def route(endpoint: Endpoint) -> RouteSpec:
             auth_source=AuthSource.SSO_JWT,
             extra_headers=_mis_headers(),
             body_shape=_MIS_BODY_SHAPE,
+        )
+    # --- CHO-211 data endpoints ---------------------------------------------
+    if endpoint is Endpoint.HOLDINGS:
+        # COTI wants the "Session " prefix (probe-verified: the prefixed
+        # SessionId is the only enforced credential).
+        return RouteSpec(
+            url=config.upstream_holdings_url(),
+            auth_source=AuthSource.SESSION_ID,
+            extra_headers=_dotnet_headers(),
+            body_shape=_DOTNET_BODY_SHAPE,
+            auth_prefix="Session ",
+        )
+    if endpoint is Endpoint.PAYIN:
+        return RouteSpec(
+            url=config.upstream_payin_url(),
+            auth_source=AuthSource.SESSION_ID,
+            extra_headers=_dotnet_headers(),
+            body_shape=_DOTNET_BODY_SHAPE,
+        )
+    if endpoint is Endpoint.PAYOUT:
+        return RouteSpec(
+            url=config.upstream_payout_url(),
+            auth_source=AuthSource.SESSION_ID,
+            extra_headers=_dotnet_headers(),
+            body_shape=_DOTNET_BODY_SHAPE,
+        )
+    if endpoint is Endpoint.BROKERAGE:
+        # middleware-go slab: raw SSO JWT (the only data endpoint needing a
+        # fresh SSO token). Envelope carries Status "Success" + Response, same
+        # field-based gate as the .NET shape — never string-matches Reason.
+        return RouteSpec(
+            url=config.upstream_brokerage_url(),
+            auth_source=AuthSource.SSO_JWT,
+            extra_headers=_dotnet_headers(),
+            body_shape=_DOTNET_BODY_SHAPE,
         )
     raise KeyError(f"no route for endpoint {endpoint!r}")

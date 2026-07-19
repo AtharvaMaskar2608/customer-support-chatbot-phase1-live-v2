@@ -86,3 +86,50 @@ def upstream_cml_url() -> str:
 def report_file_ttl_seconds() -> float:
     """TTL for a generated-report download token (override REPORT_FILE_TTL_SECONDS)."""
     return float(os.environ.get("REPORT_FILE_TTL_SECONDS", "300"))
+
+
+# --- FinX data backends (CHO-211 data-card flows) ---------------------------
+#
+# Three more upstream families, each with its own credential scheme (see
+# openspec/changes/cho-211-data-card-flows/design.md, live-verified 2026-07-18):
+#   - Holdings          -> finxomne.choiceindia.com  (authorization: "Session <SessionId>")
+#   - Pay-In / Pay-Out  -> finx.choiceindia.com      (bare SessionId; same host as
+#                          the MIS backend but a different auth scheme)
+#   - Brokerage slab    -> api.choiceindia.com       (raw SSO JWT)
+
+UPSTREAM_FINXOMNE_BASE_DEFAULT = "https://finxomne.choiceindia.com"
+
+
+def _finxomne_base() -> str:
+    return os.environ.get(
+        "UPSTREAM_FINXOMNE_BASE", UPSTREAM_FINXOMNE_BASE_DEFAULT
+    )
+
+
+def upstream_holdings_url() -> str:
+    """COTI Holdings endpoint (override with UPSTREAM_HOLDINGS_URL)."""
+    return os.environ.get(
+        "UPSTREAM_HOLDINGS_URL", f"{_finxomne_base()}/COTI/V1/Holdings"
+    )
+
+
+def upstream_payin_url() -> str:
+    """GetPayInTxnRpt endpoint (override with UPSTREAM_PAYIN_URL)."""
+    return os.environ.get(
+        "UPSTREAM_PAYIN_URL", f"{_mis_base()}/api/middleware/GetPayInTxnRpt"
+    )
+
+
+def upstream_payout_url() -> str:
+    """GetPayOutTxnRpt endpoint (override with UPSTREAM_PAYOUT_URL)."""
+    return os.environ.get(
+        "UPSTREAM_PAYOUT_URL", f"{_mis_base()}/api/middleware/GetPayOutTxnRpt"
+    )
+
+
+def upstream_brokerage_url() -> str:
+    """Brokerage slab endpoint (override with UPSTREAM_BROKERAGE_URL)."""
+    return os.environ.get(
+        "UPSTREAM_BROKERAGE_URL",
+        f"{_finx_middleware_base()}/middleware-go/v2/get-brokerage-slab",
+    )

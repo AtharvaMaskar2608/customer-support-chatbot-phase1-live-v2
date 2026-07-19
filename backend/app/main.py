@@ -10,6 +10,9 @@ import httpx
 from fastapi import FastAPI
 
 from app import config
+from app.data.brokerage import router as brokerage_router
+from app.data.holdings import router as holdings_router
+from app.data.money import router as money_router
 from app.finx.delivery import FileTokenStore
 from app.greeting import router as greeting_router
 from app.report import router as report_router
@@ -62,6 +65,10 @@ def create_app() -> FastAPI:
     app.include_router(ledger_router)
     app.include_router(tax_router)
     app.include_router(contract_notes_router)
+    # CHO-211 data-card flows (the answer is data rendered in-chat, not a file).
+    app.include_router(holdings_router)
+    app.include_router(money_router)
+    app.include_router(brokerage_router)
     return app
 
 

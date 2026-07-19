@@ -154,6 +154,38 @@ export function CheckIcon(props: IconProps) {
   )
 }
 
+/** Pie-chart glyph — the holdings data-card sticker. */
+export function PieIcon(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <path d="M21.21 15.89A10 10 0 1 1 8 2.83" />
+      <path d="M22 12A10 10 0 0 0 12 2v10z" />
+    </StrokeIcon>
+  )
+}
+
+/** Opposing arrows — the pay in / out sticker (Wave B). */
+export function SwapIcon(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <path d="M7 5v14" />
+      <path d="M4 16l3 3 3-3" />
+      <path d="M17 19V5" />
+      <path d="M14 8l3-3 3 3" />
+    </StrokeIcon>
+  )
+}
+
+/** Price-tag glyph — the brokerage sticker (Wave B). */
+export function TagIcon(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
+      <path d="M7 7h.01" />
+    </StrokeIcon>
+  )
+}
+
 /** Left/right chevrons for the calendar month nav. */
 export function ChevronLeftIcon(props: IconProps) {
   return (

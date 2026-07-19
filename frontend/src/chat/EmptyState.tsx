@@ -1,4 +1,4 @@
-import type { FlowDescriptor } from '../flow/types'
+import type { AnyFlowDescriptor } from '../flow/dataflow'
 import { Stickers } from './Stickers'
 
 /**
@@ -16,7 +16,7 @@ export function EmptyState({
   firstName: string | null
   collapsing: boolean
   onCollapsed: () => void
-  onPick: (flow: FlowDescriptor) => void
+  onPick: (flow: AnyFlowDescriptor) => void
 }>) {
   return (
     <div

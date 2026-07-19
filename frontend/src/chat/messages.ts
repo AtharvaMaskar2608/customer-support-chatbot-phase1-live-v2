@@ -5,6 +5,7 @@
  */
 
 import type { FileInfo, ReportErrorCode } from '../flow/api'
+import type { DataErrorCode } from '../flow/dataflow'
 import type { FlowRun } from '../flow/engine'
 import type { FilledValues, HelpKind } from '../flow/types'
 import type { ClientNote } from './notes'
@@ -57,6 +58,13 @@ export type Message =
   | { id: string; kind: 'help'; helpKind: HelpKind }
   /** Ticket-confirmation card. */
   | { id: string; kind: 'ticket'; ticketId: string }
+  /** A rendered data card (the answer in the chat). `data` is the payload the
+   *  flow's fetch produced; its Card component narrows it. */
+  | { id: string; kind: 'datacard'; flowKey: string; data: unknown }
+  /** Calm empty-state card for a data flow (kind "empty" from the backend). */
+  | { id: string; kind: 'dataEmpty'; flowKey: string }
+  /** Follow-up line under a data card (help affordance). */
+  | { id: string; kind: 'dataFollowup'; flowKey: string }
 
 /** Graceful, in-conversation copy for each backend failure mode. */
 export function errorLine(code: ReportErrorCode): string {
@@ -70,6 +78,18 @@ export function errorLine(code: ReportErrorCode): string {
   }
 }
 
+/** Graceful copy for a data-flow failure; `noun` e.g. "your holdings". */
+export function dataErrorLine(code: DataErrorCode, noun: string): string {
+  switch (code) {
+    case 'auth_expired':
+      return "Your session's expired — please reopen Jini from FinX and try again."
+    case 'no_data':
+      return `I couldn't find ${noun} just now. Want to try again in a moment?`
+    default:
+      return `Something went wrong fetching ${noun}. Mind trying again in a moment?`
+  }
+}
+
 /** Intro copy for the help card, by kind. */
 export function helpIntro(kind: HelpKind): string {
   switch (kind) {
@@ -79,6 +99,12 @@ export function helpIntro(kind: HelpKind): string {
       return "Contract notes aren't password-protected — they should open directly. Want a hand?"
     case 'email':
       return 'Email can take a couple of minutes, or land in spam. Want a hand?'
+    case 'holding':
+      return 'Prices here are from the last fetch — not a live feed — so they can lag the market. Ask again for fresher numbers. Want a hand?'
+    case 'payin':
+      return 'Deposits can sit as ‘Pending’ before they land; failed ones auto-reverse. Withdrawals need enough free balance — a rejected one says exactly why in its details. Want a hand?'
+    case 'brokerage':
+      return "These are your plan's rates — a specific trade's actual charges are on its contract note. Want a hand?"
   }
 }
 
