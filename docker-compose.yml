@@ -1,0 +1,29 @@
+# Server deploy — pulls both images from ECR and runs them.
+#
+#   aws ecr get-login-password --region ap-south-1 \
+#     | docker login --username AWS --password-stdin 829433345651.dkr.ecr.ap-south-1.amazonaws.com
+#   docker compose pull
+#   docker compose up -d
+#
+# Requires a production `.env` next to this file (real DATABASE_URL reachable from the
+# server, ANTHROPIC_API_KEY, OPENAI_API_KEY, FRESHDESK_API_KEY/DOMAIN, ...).
+# Bump the image tags when you push new builds.
+#
+# The frontend's nginx proxies /api to the backend service same-origin (SSE-safe),
+# so the public reverse proxy for https://jini-chatbot.quanthm.com only needs to
+# forward to :8080; :8000 is exposed for direct debugging only.
+services:
+  backend:
+    image: 829433345651.dkr.ecr.ap-south-1.amazonaws.com/customer-support-chatbot:backendv1.0.3
+    env_file: .env                 # secrets: DATABASE_URL, ANTHROPIC_API_KEY, OPENAI_API_KEY, FRESHDESK_*, ...
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  frontend:
+    image: 829433345651.dkr.ecr.ap-south-1.amazonaws.com/customer-support-chatbot:frontendv1.0.2
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+    depends_on:
+      - backend
