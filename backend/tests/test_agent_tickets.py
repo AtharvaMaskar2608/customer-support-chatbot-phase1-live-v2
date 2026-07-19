@@ -251,6 +251,9 @@ def test_group_id_env_override(monkeypatch):
 
 
 def test_api_root_built_from_domain(monkeypatch):
+    # Hermetic against the developer's real .env: _secret falls back to the
+    # root env file when the process env lacks the key, so kill the fallback.
+    monkeypatch.setattr(config, "_root_env_value", lambda key: None)
     monkeypatch.delenv("FRESHDESK_API_ROOT", raising=False)
     monkeypatch.setenv("FRESHDESK_DOMAIN", "choiceindia")
     assert config.freshdesk_api_root() == "https://choiceindia.freshdesk.com/api/v2"
