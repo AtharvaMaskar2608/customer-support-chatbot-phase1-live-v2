@@ -65,7 +65,18 @@ export interface AgentDataArtifact {
   [field: string]: unknown
 }
 
-export type AgentArtifact = AgentFileArtifact | AgentDataArtifact
+/** A form handover (CHO-214) — boots the matching guided flow inline,
+ *  pre-filled with the validated seed. The seed is re-validated against the
+ *  flow descriptor before any value reaches a widget. */
+export interface AgentFlowArtifact {
+  kind: 'flow'
+  /** Report-flow key: "pnl" | "ledger" | "tax" | "contract-notes". */
+  flowKey: string
+  /** Slot values the user stated, e.g. {segment, fromDate, toDate, delivery}. */
+  seed: Record<string, unknown>
+}
+
+export type AgentArtifact = AgentFileArtifact | AgentDataArtifact | AgentFlowArtifact
 
 export interface AgentDoneEvent {
   thread: { taskTurns: number; sessionTurns: number }
@@ -100,6 +111,10 @@ function parseArtifact(x: unknown): AgentArtifact | null {
   }
   if (a.kind === 'data' && typeof a.tool === 'string') {
     return { ...a, kind: 'data', tool: a.tool }
+  }
+  if (a.kind === 'flow' && typeof a.flowKey === 'string') {
+    const seed = asRecord(a.seed) ?? {}
+    return { kind: 'flow', flowKey: a.flowKey, seed }
   }
   return null
 }

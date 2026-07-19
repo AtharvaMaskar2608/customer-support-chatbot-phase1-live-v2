@@ -150,19 +150,24 @@ class Thread:
 
     def messages(self) -> list[dict[str, Any]]:
         """Rebuild the wire-faithful Anthropic messages array. Consecutive
-        tool_result turns merge into ONE user-role message (that is how they
-        went over the wire after a parallel-tool assistant turn); flow_event
-        turns are store-only and never enter the model transcript."""
+        user-role turns merge into ONE user-role message: tool_result runs
+        (that is how they went over the wire after a parallel-tool assistant
+        turn) and flow_event memos beside an adjacent user turn (CHO-214 —
+        widget completions enter the transcript as framed app-event blocks;
+        the roles must not collide on the wire). Turn sequences without flow
+        events produce exactly the pre-CHO-214 array."""
         messages: list[dict[str, Any]] = []
-        last_kind: str | None = None
         for turn in self.turns:
-            if turn.kind == "flow_event":
-                continue
-            if turn.kind == "tool_result" and last_kind == "tool_result":
-                messages[-1]["content"].extend(turn.content)
+            if turn.role == "user" and messages and messages[-1]["role"] == "user":
+                merged = messages[-1]["content"] + list(turn.content)
+                # The API requires tool_result blocks first in a user message;
+                # a flow_event landing mid-tool-round would otherwise precede
+                # them. Stable partition keeps order within each group.
+                results = [b for b in merged if b.get("type") == "tool_result"]
+                others = [b for b in merged if b.get("type") != "tool_result"]
+                messages[-1]["content"] = results + others
             else:
                 messages.append({"role": turn.role, "content": list(turn.content)})
-            last_kind = turn.kind
         return messages
 
 

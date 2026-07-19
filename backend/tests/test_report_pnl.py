@@ -285,3 +285,68 @@ def test_logs_carry_no_pii(client, caplog):
     assert "X008593" not in logtext
     assert "test-session-token" not in logtext
     assert "test-sso-jwt" not in logtext
+
+
+# --- flow-event memory (CHO-214) ---------------------------------------------
+
+
+def _wait_for_turns(store, session_id, *, tries=100):
+    import asyncio
+    import time
+
+    for _ in range(tries):
+        thread = asyncio.run(store.get_thread(session_id))
+        if thread.turns:
+            return thread
+        time.sleep(0.01)
+    return asyncio.run(store.get_thread(session_id))
+
+
+@respx.mock
+def test_download_success_records_flow_event(client):
+    """A widget-completed P&L lands in agent memory: the route appends a
+    flow_event turn (fire-and-forget) with the framed memo and label slots."""
+    _mock_pnl(_pnl_success(ARTIFACT_URL))
+    _mock_artifact()
+    resp = client.post("/api/report/pnl", headers=HEADERS, json=DOWNLOAD_BODY)
+    assert resp.status_code == 200
+
+    store = client.app.state.conversation_store
+    thread = _wait_for_turns(store, HEADERS["X-Session-Id"])
+    assert len(thread.turns) == 1
+    turn = thread.turns[0]
+    assert turn.kind == "flow_event"
+    assert turn.role == "user"
+    memo = turn.content[0]["text"]
+    assert memo.startswith("[App event")
+    assert "P&L form" in memo
+    assert "Equity" in memo
+    assert "downloaded successfully" in memo
+    assert turn.meta["slots"] == {
+        "segment": "Equity",
+        "fromDate": "2026-04-01",
+        "toDate": "2026-07-21",
+    }
+    # Memory carries labels only — never the report URL or session token.
+    dump = memo + str(turn.meta)
+    assert ARTIFACT_URL not in dump
+    assert HEADERS["X-Session-Id"] not in dump
+
+
+@respx.mock
+def test_upstream_failure_records_no_flow_event(client):
+    """Only success becomes memory."""
+    import time
+
+    _mock_pnl(httpx.Response(
+        200, json={"Status": "Fail", "Response": "", "Reason": "No Data Found"}
+    ))
+    resp = client.post("/api/report/pnl", headers=HEADERS, json=DOWNLOAD_BODY)
+    assert resp.status_code != 200
+
+    time.sleep(0.05)
+    import asyncio
+
+    store = client.app.state.conversation_store
+    thread = asyncio.run(store.get_thread(HEADERS["X-Session-Id"]))
+    assert thread.turns == []

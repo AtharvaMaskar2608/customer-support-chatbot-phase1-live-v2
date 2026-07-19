@@ -62,6 +62,16 @@ _ESCALATION_REMINDER = (
     "anything unresolved.</system-reminder>"
 )
 
+# Session backstop alone (CHO-214 · D6): a long-lived thread is normal use,
+# not evidence of struggle — offer a human only when the user seems stuck.
+_SOFT_ESCALATION_REMINDER = (
+    "<system-reminder>This session has been running a while. If the user "
+    "seems stuck, frustrated, or keeps rephrasing the same unresolved "
+    "question, offer to connect them with a human support agent. If their "
+    "request is clear and answerable, just answer it normally — do not "
+    "mention conversation length or suggest escalation.</system-reminder>"
+)
+
 _WRAPUP_REMINDER = (
     "<system-reminder>Tool-call limit reached for this message. Do not "
     "request any more tools. Summarize what you found so far, tell the user "
@@ -132,6 +142,14 @@ def _artifact_payload(
     envelope = outcome.envelope
     if outcome.is_error or not isinstance(envelope, dict):
         return None
+    if name == "open_report_form" and envelope.get("kind") == "form":
+        # Form handover (CHO-214): the shell boots the guided FlowCard from
+        # this seed via startRun(descriptor, seed).
+        return {
+            "kind": "flow",
+            "flowKey": envelope.get("flow"),
+            "seed": envelope.get("seed") or {},
+        }
     if "fileToken" in envelope:
         return {
             "kind": "file",
@@ -179,17 +197,25 @@ async def _chat_events(
     )
 
     # Caps are evaluated once per incoming user message (design D5), after
-    # the user turn is appended so the current message counts.
+    # the user turn is appended so the current message counts. Injection is
+    # trip-specific (CHO-214 · D6): clarify/task trips mandate the offer;
+    # the session backstop alone only asks the model to watch for struggle.
     counters = agent_caps.evaluate(thread)
-    escalate = bool(counters.tripped)
+    tripped = set(counters.tripped)
+    if tripped & {agent_caps.CAP_CLARIFY, agent_caps.CAP_TASK_TURNS}:
+        escalation_reminder: str | None = _ESCALATION_REMINDER
+    elif agent_caps.CAP_SESSION_TURNS in tripped:
+        escalation_reminder = _SOFT_ESCALATION_REMINDER
+    else:
+        escalation_reminder = None
     auth_expired = False
     rounds = 0
 
     while True:
         force_wrapup = rounds >= config.agent_max_tool_rounds()
         messages = agent_prompt.primed_messages() + thread.messages()
-        if escalate:
-            messages.append(_reminder_message(_ESCALATION_REMINDER))
+        if escalation_reminder is not None:
+            messages.append(_reminder_message(escalation_reminder))
         if force_wrapup:
             messages.append(_reminder_message(_WRAPUP_REMINDER))
 

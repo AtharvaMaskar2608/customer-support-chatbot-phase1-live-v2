@@ -198,8 +198,14 @@ function SlotWidget({
 
 function DeliveryStep({
   descriptor,
+  preferred,
   onDeliver,
-}: Readonly<{ descriptor: FlowDescriptor; onDeliver: (mode: DeliveryMode) => void }>) {
+}: Readonly<{
+  descriptor: FlowDescriptor
+  /** Agent-stated delivery preference — highlighted only; never auto-fires. */
+  preferred?: DeliveryMode
+  onDeliver: (mode: DeliveryMode) => void
+}>) {
   return (
     <div className="flex flex-wrap gap-2">
       {descriptor.delivery.map((opt) => {
@@ -215,6 +221,9 @@ function DeliveryStep({
               primary
                 ? 'border-accent bg-accent text-white hover:bg-accent-strong'
                 : 'border-zinc-200 bg-white text-zinc-700 hover:border-accent-soft hover:text-accent dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:text-accent-soft',
+              preferred === opt.mode
+                ? 'ring-2 ring-accent/60 ring-offset-1 dark:ring-offset-zinc-900'
+                : '',
             ].join(' ')}
           >
             <Icon className={`size-4 ${primary ? 'text-white' : 'text-accent dark:text-accent-soft'}`} />
@@ -231,12 +240,14 @@ function DeliveryStep({
 export function FlowCard({
   descriptor,
   run,
+  preferredDelivery,
   onPick,
   onEdit,
   onDeliver,
 }: Readonly<{
   descriptor: FlowDescriptor
   run: FlowRun
+  preferredDelivery?: DeliveryMode
   onPick: (slotKey: string, value: SlotValue) => void
   onEdit: (slotKey: string) => void
   onDeliver: (mode: DeliveryMode) => void
@@ -283,7 +294,7 @@ export function FlowCard({
   if (run.active === DELIVERY_STEP) {
     rows.push(
       <SlotRow key="__delivery__" n={descriptor.slots.length + 1} label="How do you want it?">
-        <DeliveryStep descriptor={descriptor} onDeliver={onDeliver} />
+        <DeliveryStep descriptor={descriptor} preferred={preferredDelivery} onDeliver={onDeliver} />
       </SlotRow>,
     )
   }

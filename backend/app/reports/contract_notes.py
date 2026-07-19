@@ -51,6 +51,7 @@ from app.agent.ctx import (
     parse_params,
     tool_error_from_kind,
 )
+from app.agent.events import record_flow_event
 from app.finx.client import ResultKind, map_response
 from app.finx.delivery import size_label
 from app.finx.routing import AuthSource, BodyShape, RouteSpec
@@ -485,4 +486,16 @@ async def contract_notes_download(
     result = await run_contract_notes_download(body, ctx)
     if isinstance(result, ToolError):
         return error_json_response(result)
+    # Widget completion → agent memory (CHO-214): fire-and-forget. The note's
+    # identity travels as its (whitelisted, UI-visible) file name.
+    file_name = (result.get("file") or {}).get("name", "")
+    record_flow_event(
+        request.app,
+        session_id=x_session_id,
+        client_code=x_user_id,
+        flow="contract-notes",
+        details=[file_name] if file_name else [],
+        slots={"file": file_name},
+        delivery="download",
+    )
     return result

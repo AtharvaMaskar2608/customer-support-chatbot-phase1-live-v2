@@ -184,7 +184,7 @@ def test_end_turn_streams_text_and_terminates(app):
         assert kwargs["max_tokens"] == 4096
         assert "thinking" not in kwargs  # AGENT_THINKING=off omits it
         assert kwargs["system"][0]["cache_control"] == {"type": "ephemeral"}
-        assert len(kwargs["tools"]) == 9
+        assert len(kwargs["tools"]) == 10  # 9 capability tools + open_report_form
 
         # primed first turn: bulk instructions + today's date at the END
         messages = kwargs["messages"]
@@ -623,3 +623,96 @@ def test_model_supplied_credentials_are_ignored_end_to_end(app):
     assert "EVIL01" not in json.dumps(sent)
     assert "stolen-session" not in json.dumps(sent)
     assert events[-1][0] == "done"
+
+
+# --- form handover (CHO-214) --------------------------------------------------
+
+
+def test_open_report_form_emits_flow_artifact_and_resolves(app):
+    """A partial P&L request opens the form: the flow artifact carries the
+    validated seed, and the successful tool call is a resolution event (the
+    task window resets the moment the form appears)."""
+    fake = FakeAnthropic([
+        _tool_msg(_tool_use(
+            "open_report_form", {"flow": "pnl", "segment": "Equity"}
+        )),
+        _text_msg("Opening your P&L setup — Equity's filled in."),
+    ])
+    with TestClient(app) as client:
+        app.state.anthropic_client = fake
+        resp = _post_chat(client, "P&L for equity")
+        events = _parse_events(resp)
+
+    artifacts = [d for e, d in events if e == "artifact"]
+    assert artifacts == [
+        {"kind": "flow", "flowKey": "pnl", "seed": {"segment": "Equity"}}
+    ]
+    # Resolution: the successful form-open resets the task window.
+    assert events[-1] == ("done", {"thread": {"taskTurns": 0, "sessionTurns": 1}})
+
+
+def test_open_report_form_drops_invalid_seed_values(app):
+    """A hallucinated segment degrades to an unseeded field in the artifact —
+    never an error, never a mis-filled form."""
+    fake = FakeAnthropic([
+        _tool_msg(_tool_use(
+            "open_report_form", {"flow": "pnl", "segment": "Crypto"}
+        )),
+        _text_msg("Here you go — pick the details."),
+    ])
+    with TestClient(app) as client:
+        app.state.anthropic_client = fake
+        resp = _post_chat(client, "crypto P&L")
+        events = _parse_events(resp)
+
+    artifacts = [d for e, d in events if e == "artifact"]
+    assert artifacts == [{"kind": "flow", "flowKey": "pnl", "seed": {}}]
+
+
+def test_session_backstop_alone_injects_soft_reminder(app):
+    """CHO-214 · D6: a long session with no current-task struggle gets the
+    conditional instruction — a fresh, clean query must not be told the
+    conversation has been 'going back and forth'."""
+    fake = FakeAnthropic([_text_msg("Here's your answer.")])
+    with TestClient(app) as client:
+        app.state.anthropic_client = fake
+        thread = _get_thread(app)
+        for index in range(19):
+            _append(app, thread, role="user", kind="user_text",
+                    text=f"question {index}")
+            _append(app, thread, role="user", kind="tool_result",
+                    content=[{"type": "tool_result", "tool_use_id": f"t{index}",
+                              "content": "{}", "is_error": False}],
+                    meta={"tool_name": "search_knowledge_base",
+                          "is_error": False, "duration_ms": 1})
+            _append(app, thread, role="assistant", kind="assistant_text",
+                    text=f"answer {index}")
+        resp = _post_chat(client, "what are the DP charges?")
+        _parse_events(resp)
+
+        reminders = _reminder_texts(fake.calls[0])
+        assert len(reminders) == 1
+        assert "seems stuck" in reminders[0]          # conditional offer
+        assert "Conversation limit" not in reminders[0]  # not the mandatory one
+
+
+def test_clarify_trip_still_injects_mandatory_reminder(app):
+    """Clarify-cap trips keep the unconditional escalation instruction even
+    when the session backstop has also tripped."""
+    fake = FakeAnthropic([_text_msg("Let me get you a human.")])
+    with TestClient(app) as client:
+        app.state.anthropic_client = fake
+        thread = _get_thread(app)
+        _append(app, thread, role="user", kind="user_text", text="a report")
+        _append(app, thread, role="assistant", kind="assistant_text",
+                text="Which report do you want?")
+        _append(app, thread, role="user", kind="user_text", text="the usual")
+        _append(app, thread, role="assistant", kind="assistant_text",
+                text="Could you name the report — P&L, ledger, or gains?")
+        resp = _post_chat(client, "come on")
+        _parse_events(resp)
+
+        reminders = _reminder_texts(fake.calls[0])
+        assert len(reminders) == 1
+        assert "Conversation limit reached" in reminders[0]
+        assert "clarifying question" in reminders[0]
