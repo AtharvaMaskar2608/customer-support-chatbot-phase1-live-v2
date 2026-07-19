@@ -60,7 +60,14 @@ function isLive(descriptor: FlowDescriptor): boolean {
 export function ChatShell({
   session,
   firstName,
-}: Readonly<{ session: SessionContext; firstName: string | null }>) {
+  onEngaged,
+}: Readonly<{
+  session: SessionContext
+  firstName: string | null
+  /** Fired when the conversation kicks off (sticker tap or first submit) —
+   *  the header swaps What's New for Restart (CHO-216). */
+  onEngaged?: () => void
+}>) {
   const [messages, setMessages] = useState<Message[]>([])
   const [phase, setPhase] = useState<'empty' | 'collapsing' | 'chat'>('empty')
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -121,6 +128,7 @@ export function ChatShell({
 
   function engage() {
     setPhase((p) => (p === 'empty' ? 'collapsing' : p))
+    onEngaged?.()
   }
 
   /* ── entry points ───────────────────────────────────────────────────── */
@@ -179,6 +187,9 @@ export function ChatShell({
 
   /** In-flight agent stream — superseded (aborted) by the next submit. */
   const agentAbort = useRef<AbortController | null>(null)
+
+  // Restart remounts the shell (CHO-216) — a stream must not outlive it.
+  useEffect(() => () => agentAbort.current?.abort(), [])
 
   /**
    * Stream one agent exchange: typing dots until the first event, text

@@ -618,3 +618,50 @@ def test_replay_without_flow_events_is_unchanged():
     assert [m["role"] for m in messages] == ["user", "assistant", "user",
                                              "assistant"]
     assert [b["tool_use_id"] for b in messages[2]["content"]] == ["t1", "t2"]
+
+
+# --- per-session reset (CHO-216) ----------------------------------------------
+
+
+def test_reset_thread_closes_and_starts_fresh():
+    async def main():
+        store = ThreadStore()  # memory-only
+        thread = await store.get_thread("rs-session", client_code="X1")
+        store.append_turn(thread, role="user", kind="user_text",
+                          content=[{"type": "text", "text": "hi"}])
+        old_id = thread.id
+
+        fresh = await store.reset_thread("rs-session")
+        assert fresh.id != old_id
+        assert fresh.turns == []                    # blank slate
+        assert fresh.client_code == "X1"            # carried over
+        assert thread.status == "resolved"          # old thread closed, kept
+        assert (await store.get_thread("rs-session")).id == fresh.id
+
+        # Idempotent: resetting again just starts another fresh thread.
+        fresh2 = await store.reset_thread("rs-session")
+        assert fresh2.id != fresh.id
+        assert fresh2.turns == []
+
+    asyncio.run(main())
+
+
+def test_reset_thread_persists_status_and_fresh_row():
+    async def main():
+        store = ThreadStore(pool=FakePool())
+        thread = await store.get_thread("rs2", client_code="X1")
+        before = store._queue.qsize()
+        await store.reset_thread("rs2")
+        # close-status write for the old thread + row for the fresh one
+        assert store._queue.qsize() >= before + 2
+
+    asyncio.run(main())
+
+
+def test_rehydration_selects_latest_thread():
+    """One session id maps to many thread rows after resets — a cache-miss
+    rehydrate must pick the newest, never a closed older one."""
+    from app.agent.store import _SELECT_THREAD_SQL
+
+    assert "ORDER BY created_at DESC" in _SELECT_THREAD_SQL
+    assert "LIMIT 1" in _SELECT_THREAD_SQL

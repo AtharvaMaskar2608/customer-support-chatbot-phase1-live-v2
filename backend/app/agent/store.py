@@ -77,6 +77,8 @@ _SELECT_THREAD_SQL = """
 SELECT id, session_id, client_code, status, prompt_hash, created_at, last_active_at
 FROM threads
 WHERE session_id = $1
+ORDER BY created_at DESC
+LIMIT 1
 """
 
 _SELECT_TURNS_SQL = """
@@ -284,6 +286,32 @@ class ThreadStore:
         thread.last_active_at = turn.created_at
         self._enqueue(("turn", self._thread_row(thread), self._turn_row(thread, turn)))
         return turn
+
+    async def reset_thread(
+        self, session_id: str, *, client_code: str | None = None
+    ) -> Thread:
+        """Restart the session's conversation (CHO-216): close the current
+        thread (status `resolved` — every row retained for the training
+        corpus) and make a fresh empty thread the session's active one, so
+        derived counters, clarify state, and flow-event memory all reset.
+        Idempotent — resetting a session with no thread just creates one.
+        A session id therefore maps to its LATEST thread (rehydration orders
+        by created_at DESC)."""
+        current = self._threads.get(session_id)
+        if current is None:
+            current = await self._rehydrate(session_id)
+        if current is not None and current.status == "active":
+            self.set_status(current, "resolved")
+        fresh = Thread(
+            id=str(uuid.uuid4()),
+            session_id=session_id,
+            client_code=client_code
+            or (current.client_code if current is not None else None),
+            prompt_hash=self._current_prompt_hash,
+        )
+        self._enqueue(("thread", self._thread_row(fresh)))
+        self._threads[session_id] = fresh
+        return fresh
 
     def set_status(self, thread: Thread, status: str) -> None:
         if status not in THREAD_STATUSES:

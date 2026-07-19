@@ -54,6 +54,24 @@ def _anthropic_client(request: Request):
     return client
 
 
+@router.post("/api/chat/reset")
+async def chat_reset(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    x_session_id: str | None = Header(default=None),
+    x_user_id: str | None = Header(default=None),
+):
+    """Restart the session's conversation (CHO-216): the current thread is
+    closed (rows retained), a fresh one becomes active — the agent forgets,
+    cap counters restart. No model call, idempotent."""
+    if not authorization or not x_session_id or not x_user_id:
+        return _missing_credentials()
+    await request.app.state.conversation_store.reset_thread(
+        x_session_id, client_code=x_user_id
+    )
+    return {"ok": True}
+
+
 @router.post("/api/chat")
 async def chat(
     body: ChatRequest,

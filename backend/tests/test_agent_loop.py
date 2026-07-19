@@ -806,3 +806,41 @@ def test_short_circuited_turn_continues_cleanly(app):
     assert last_user["role"] == "user"
     types = [block["type"] for block in last_user["content"]]
     assert types == ["tool_result", "text"]
+
+
+# --- conversation reset (CHO-216) ---------------------------------------------
+
+
+def test_chat_reset_requires_credentials(app):
+    with TestClient(app) as client:
+        resp = client.post("/api/chat/reset")
+        assert resp.status_code == 400
+        assert resp.json() == {"error": "MISSING_CREDENTIALS"}
+
+
+def test_chat_reset_gives_blank_slate(app):
+    """Reset → the next message starts a brand-new thread: the model sees no
+    prior conversation and counters restart from zero."""
+    fake = FakeAnthropic([
+        _text_msg("Noted — F&O it is."),
+        _text_msg("Hello! How can I help?"),
+    ])
+    with TestClient(app) as client:
+        app.state.anthropic_client = fake
+        _parse_events(_post_chat(client, "remember: I only care about F&O"))
+
+        resp = client.post("/api/chat/reset", headers=HEADERS)
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True}
+
+        events = _parse_events(_post_chat(client, "hello"))
+
+    # Second model call sees ONLY the primed exchange + the new message.
+    messages = fake.calls[1]["messages"]
+    assert len(messages) == 3
+    assert messages[2] == {
+        "role": "user", "content": [{"type": "text", "text": "hello"}],
+    }
+    assert "only care about" not in json.dumps(messages)  # old turn is gone
+    # Counters restarted with the fresh thread.
+    assert events[-1] == ("done", {"thread": {"taskTurns": 1, "sessionTurns": 1}})
