@@ -5,6 +5,8 @@ override them without re-importing modules.
 """
 
 import os
+import re
+from urllib.parse import quote
 
 UPSTREAM_PROFILE_URL_DEFAULT = (
     "https://mf.choiceindia.com/api/v2/investor/profile/extended"
@@ -133,3 +135,67 @@ def upstream_brokerage_url() -> str:
         "UPSTREAM_BROKERAGE_URL",
         f"{_finx_middleware_base()}/middleware-go/v2/get-brokerage-slab",
     )
+
+
+# --- KB retrieval (CHO-212) -------------------------------------------------
+#
+# The knowledge base lives in Postgres (dev: SSH tunnel on localhost:5433).
+# DATABASE_URL and OPENAI_API_KEY are secrets: read from the environment, with
+# a dev-convenience fallback to the untracked repo-root .env so `uv run
+# uvicorn` works without exporting. Values are never logged.
+
+_ROOT_ENV = os.path.join(os.path.dirname(__file__), "..", "..", ".env")
+
+
+def _root_env_value(key: str) -> str | None:
+    """Minimal .env reader. Tolerates the formats found in the wild in this
+    repo's .env: `KEY=v`, `KEY = "v"` (spaces), and `export KEY="v"`."""
+    pattern = re.compile(rf"^(?:export\s+)?{re.escape(key)}\s*=\s*(.*)$")
+    try:
+        with open(_ROOT_ENV, encoding="utf-8") as fh:
+            for line in fh:
+                match = pattern.match(line.strip())
+                if match:
+                    return match.group(1).strip().strip("'\"") or None
+    except OSError:
+        return None
+    return None
+
+
+def _secret(key: str) -> str | None:
+    return os.environ.get(key) or _root_env_value(key)
+
+
+def _normalize_dsn(dsn: str) -> str:
+    """Percent-encode the DSN's userinfo so asyncpg's urlparse-based DSN
+    parser accepts passwords with special characters (a raw '[' reads as IPv6
+    syntax and raises). psql accepts both forms, so normalizing is safe.
+    Already-encoded userinfo (contains '%') is left untouched."""
+    if "://" not in dsn or "@" not in dsn:
+        return dsn
+    scheme, rest = dsn.split("://", 1)
+    auth, hostpart = rest.rsplit("@", 1)
+    if "%" in auth:
+        return dsn
+    if ":" in auth:
+        user, password = auth.split(":", 1)
+        auth = f"{quote(user, safe='')}:{quote(password, safe='')}"
+    else:
+        auth = quote(auth, safe="")
+    return f"{scheme}://{auth}@{hostpart}"
+
+
+def database_url() -> str | None:
+    """Postgres DSN for the KB (env DATABASE_URL, or repo-root .env in dev)."""
+    dsn = _secret("DATABASE_URL")
+    return _normalize_dsn(dsn) if dsn else None
+
+
+def openai_api_key() -> str | None:
+    """OpenAI key for query embeddings (env, or repo-root .env in dev)."""
+    return _secret("OPENAI_API_KEY")
+
+
+def kb_embed_model() -> str:
+    """Embedding model — MUST match the corpus embeddings (3072-d)."""
+    return os.environ.get("KB_EMBED_MODEL", "text-embedding-3-large")

@@ -365,3 +365,25 @@ Empty portfolio = `Status: Success` with empty `lDictHoldingData` dict.
 ### Our proxy contract
 
 - `POST /api/data/brokerage` (headers only) → `{"kind":"ok","groups":[{title,list:[{title,desc}]}]}` passthrough (no PII) after the field-based `Status` gate.
+
+## 9. KB Search (internal tool) — `/api/kb/search`
+
+**Status:** live-verified 2026-07-19 (hybrid over 1,102 chunks; self-retrieval hit@1 98.3%, MRR 0.990). Not a FinX upstream — retrieves from our own support knowledge base in Postgres. Designed as an **agent tool**: stateless, no session headers.
+
+| Item | Value |
+|------|-------|
+| Call | `POST /api/kb/search` · body `{"query": 1–1000 chars, "top_k": 1–20 (default 5)}` |
+| Retrieval | Postgres FTS (`websearch_to_tsquery`, GIN) + pgvector cosine (`text-embedding-3-large`, 3072-d, seq scan) fused with RRF (k=60) |
+| Degrade | embedding failure → FTS-only results + `"degraded":"fts_only"` (never an error) |
+| Empty | `{"kind":"ok","results":[]}` — a valid answer |
+| Unconfigured | 503 `KB_UNAVAILABLE` (no `DATABASE_URL`) |
+
+### Response fields
+
+| Field | Notes |
+|-------|-------|
+| `results[].id/topic/section/question/answer` | the KB chunk (generic support content, no client PII) |
+| `results[].tat` | turnaround time when present, else null |
+| `results[].score` | RRF fused score (rank agreement across legs — not a probability) |
+
+**Privacy:** user queries may carry personal details — logs record length/count/timing only, never query text. `DATABASE_URL`/`OPENAI_API_KEY` live in untracked `.env` only.

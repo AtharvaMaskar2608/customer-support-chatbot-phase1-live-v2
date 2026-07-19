@@ -6,6 +6,7 @@ Run from backend/:  uv run uvicorn app.main:app --port 8000
 import logging
 from contextlib import asynccontextmanager
 
+import asyncpg
 import httpx
 from fastapi import FastAPI
 
@@ -15,11 +16,14 @@ from app.data.holdings import router as holdings_router
 from app.data.money import router as money_router
 from app.finx.delivery import FileTokenStore
 from app.greeting import router as greeting_router
+from app.kb.router import router as kb_router
 from app.report import router as report_router
 from app.reports.contract_notes import router as contract_notes_router
 from app.reports.ledger import router as ledger_router
 from app.reports.tax import router as tax_router
 from app.whats_new import router as whats_new_router
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -36,7 +40,23 @@ async def lifespan(app: FastAPI):
         timeout=httpx.Timeout(config.upstream_timeout_seconds(), connect=8.0),
     ) as client:
         app.state.http_client = client
-        yield
+        # KB retrieval pool (CHO-212). min_size=0 keeps startup lazy, and any
+        # failure leaves pg_pool=None so the app still boots for non-KB routes
+        # (the KB endpoint then answers 503 KB_UNAVAILABLE).
+        app.state.pg_pool = None
+        dsn = config.database_url()
+        if dsn:
+            try:
+                app.state.pg_pool = await asyncpg.create_pool(
+                    dsn, min_size=0, max_size=5, timeout=8
+                )
+            except (OSError, asyncpg.PostgresError) as exc:
+                logger.warning("KB pool unavailable: %s", type(exc).__name__)
+        try:
+            yield
+        finally:
+            if app.state.pg_pool is not None:
+                await app.state.pg_pool.close()
 
 
 def create_app() -> FastAPI:
@@ -69,6 +89,7 @@ def create_app() -> FastAPI:
     app.include_router(holdings_router)
     app.include_router(money_router)
     app.include_router(brokerage_router)
+    app.include_router(kb_router)
     return app
 
 
