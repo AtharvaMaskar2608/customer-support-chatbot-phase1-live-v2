@@ -87,6 +87,28 @@ docker compose up -d
 docker compose ps          # both services Up
 ```
 
+**As deployed 2026-07-19** (compose unavailable on the server — apt mirror blocked
+by the corporate proxy — and ECR pull blocked pending the IAM grant): images were
+transferred as `docker save` tarballs and started with plain `docker run` from
+`/home/harsh/jini/`, equivalent to the compose file:
+
+```bash
+docker load < jini-backend-v1.0.3.tar.gz
+docker load < jini-frontend-v1.0.2.tar.gz
+docker network create jini-net
+docker run -d --name jini-backend  --network jini-net --network-alias backend \
+  --env-file /home/harsh/jini/.env --restart unless-stopped -p 8000:8000 \
+  829433345651.dkr.ecr.ap-south-1.amazonaws.com/customer-support-chatbot:backendv1.0.3
+docker run -d --name jini-frontend --network jini-net --restart unless-stopped -p 8080:80 \
+  829433345651.dkr.ecr.ap-south-1.amazonaws.com/customer-support-chatbot:frontendv1.0.2
+```
+
+The pre-existing nginx vhost `/etc/nginx/conf.d/jini-chatbot.quanthm.com.conf`
+(wildcard-cert TLS, `/`→8080, `/api/`→8000 with SSE buffering already off)
+required no changes. The domain is reachable from the corporate network only
+(firewall at the public IP). Switch back to the compose flow once apt/ECR
+access exists: `docker rm -f jini-backend jini-frontend`, then §4 as written.
+
 Point the TLS reverse proxy for `jini-chatbot.quanthm.com` at `:8080`. If that
 proxy is nginx, disable buffering for `/api/` there too (`proxy_buffering off;`)
 — the chat endpoint is an SSE stream and any buffering hop kills the typing
