@@ -49,11 +49,11 @@ Groups 1–3 are the foundation (backend routes/normalizers + shared card system
 
 ## 8. Verification
 
-- [ ] 8.1 Backend tests green; live-verify all four upstreams (needs fresh SSO for brokerage)
+- [x] 8.1 Backend tests green (198); live-verified holdings + money; brokerage OK-path deferred — needs fresh SSO (its AUTH_EXPIRED path verified live)
 - [x] 8.2 Playwright: all three cards end-to-end (mock upstream), incl. filter chips, expand, CSV download, dark theme
 - [x] 8.3 HTML verification report with screenshots (per project convention)
 
 ## 9. Ship
 
-- [ ] 9.1 git-sync: commit(s) `CHO-211: …`, push, PR `CHO-211: data-card flows` with `Fixes CHO-211`
-- [ ] 9.2 linear-connector: In Progress at implementation start; summary comment + Done at merge
+- [x] 9.1 git-sync: commit(s) `CHO-211: …`, push, PR `CHO-211: data-card flows` with `Fixes CHO-211`
+- [x] 9.2 linear-connector: In Progress at implementation start; summary comment + Done at merge
