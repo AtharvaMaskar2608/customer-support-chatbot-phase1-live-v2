@@ -47,8 +47,13 @@ function isGroup(x: unknown): x is BrokerageGroup {
 export async function fetchBrokerage(session: SessionContext): Promise<BrokerageResult> {
   const envelope = await postData('/api/data/brokerage', session)
   if (envelope.kind !== 'ok') return envelope
+  return parseBrokeragePayload(envelope.body)
+}
 
-  const { groups } = envelope.body
+/** Validate + normalize an `ok` payload body. Shared by the flow fetch and
+ *  the agent's data artifacts (CHO-213) — both render the same card. */
+export function parseBrokeragePayload(body: Record<string, unknown>): BrokerageResult {
+  const { groups } = body
   if (!Array.isArray(groups) || !groups.every(isGroup)) {
     return { kind: 'error', code: 'upstream_error' }
   }

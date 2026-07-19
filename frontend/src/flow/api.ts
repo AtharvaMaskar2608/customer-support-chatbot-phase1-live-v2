@@ -48,7 +48,9 @@ function statusToError(status: number): ReportErrorCode {
   return 'UPSTREAM_ERROR'
 }
 
-function isFileInfo(x: unknown): x is FileInfo {
+/** Structural check for the pinned file payload (also used by the agent SSE
+ *  client to validate file artifacts before rendering the download card). */
+export function isFileInfo(x: unknown): x is FileInfo {
   if (x === null || typeof x !== 'object') return false
   const f = x as Record<string, unknown>
   return typeof f.name === 'string' && typeof f.sizeLabel === 'string' && typeof f.format === 'string'

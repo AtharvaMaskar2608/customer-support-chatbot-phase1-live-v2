@@ -21,12 +21,13 @@ import logging
 
 from fastapi import APIRouter, Header, Request
 
-from app.data.envelope import (
-    KIND_EMPTY,
-    KIND_OK,
-    error_response,
-    missing_credentials,
+from app.agent.ctx import (
+    ToolCtx,
+    ToolError,
+    error_json_response,
+    tool_error_from_kind,
 )
+from app.data.envelope import KIND_EMPTY, KIND_OK, missing_credentials
 from app.finx.client import FinxClient, ResultKind
 from app.finx.routing import Endpoint
 
@@ -64,6 +65,40 @@ def _clean_groups(response: object) -> list[dict] | None:
     return groups
 
 
+async def run_brokerage(
+    params: dict | None, ctx: ToolCtx
+) -> dict | ToolError:
+    """Brokerage slab core — shared by the REST route and the agent tool.
+
+    Zero-slot: `params` is ignored. Returns the route's exact 200 body
+    ({"kind": "ok"/"empty", ...}) on success, a ToolError otherwise; never
+    raises. Only each group's `title` and its items' `title`/`desc` pass
+    through — every other upstream key is stripped.
+    """
+    del params  # zero-slot: no user-intent fields exist for this flow
+
+    # IDOR defense: ClientID comes ONLY from the session context — nothing
+    # user-controlled is read.
+    finx = FinxClient(ctx.http_client)
+    result = await finx.call(
+        Endpoint.BROKERAGE,
+        session_id=ctx.session_id,
+        sso_jwt=ctx.sso_jwt,
+        body={"ClientID": ctx.client_code},
+    )
+    if result.kind is ResultKind.EMPTY:
+        return {"kind": KIND_EMPTY}
+    if result.kind is not ResultKind.OK:
+        return tool_error_from_kind(result.kind)
+
+    groups = _clean_groups((result.payload or {}).get("Response"))
+    if groups is None:
+        return tool_error_from_kind(ResultKind.UPSTREAM_ERROR)
+    if not groups:
+        return {"kind": KIND_EMPTY}
+    return {"kind": KIND_OK, "groups": groups}
+
+
 @router.post("/api/data/brokerage")
 async def brokerage(
     request: Request,
@@ -74,23 +109,13 @@ async def brokerage(
     if not authorization or not x_session_id or not x_user_id:
         return missing_credentials()
 
-    # IDOR defense: ClientID comes ONLY from the session header — no request
-    # body is even read.
-    finx = FinxClient(request.app.state.http_client)
-    result = await finx.call(
-        Endpoint.BROKERAGE,
+    ctx = ToolCtx(
         session_id=x_session_id,
         sso_jwt=authorization,
-        body={"ClientID": x_user_id},
+        client_code=x_user_id,
+        http_client=request.app.state.http_client,
     )
-    if result.kind is ResultKind.EMPTY:
-        return {"kind": KIND_EMPTY}
-    if result.kind is not ResultKind.OK:
-        return error_response(result.kind)
-
-    groups = _clean_groups((result.payload or {}).get("Response"))
-    if groups is None:
-        return error_response(ResultKind.UPSTREAM_ERROR)
-    if not groups:
-        return {"kind": KIND_EMPTY}
-    return {"kind": KIND_OK, "groups": groups}
+    result = await run_brokerage(None, ctx)
+    if isinstance(result, ToolError):
+        return error_json_response(result)
+    return result

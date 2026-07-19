@@ -20,6 +20,9 @@ export type Message =
   | { id: string; kind: 'user'; text: string }
   /** Bot text line; `**bold**` marks emphasis (see RichText). */
   | { id: string; kind: 'bot'; text: string }
+  /** Streaming agent reply — grows in place as SSE text deltas arrive.
+   *  Rendered like `bot`, plus pre-wrap so the model's paragraphs survive. */
+  | { id: string; kind: 'agent'; text: string }
   /** Transient "typing…" dots. */
   | { id: string; kind: 'typing' }
   /** The available-actions sticker row (unmatched composer text). */
@@ -88,6 +91,27 @@ export function dataErrorLine(code: DataErrorCode, noun: string): string {
     default:
       return `Something went wrong fetching ${noun}. Mind trying again in a moment?`
   }
+}
+
+/** Copy for an agent stream dropping mid-answer (partial text already on
+ *  screen, so keyword fallback would read as a non-sequitur). */
+export function agentInterruptLine(): string {
+  return 'Sorry — I lost the thread there. Mind sending that again?'
+}
+
+/** Friendly progress caption for an agent tool round — never the raw tool
+ *  name. Matches the tone of the flows' own narration captions. */
+export function toolCaption(name: string): string {
+  const n = name.toLowerCase()
+  if (n.includes('kb') || n.includes('search') || n.includes('knowledge')) return 'Looking that up…'
+  if (n.includes('holding')) return 'Fetching your holdings…'
+  if (n.includes('money') || n.includes('pay')) return 'Pulling your transactions…'
+  if (n.includes('brokerage')) return 'Fetching your plan…'
+  if (n.includes('pnl') || n.includes('profit')) return 'Pulling your P&L…'
+  if (n.includes('ledger')) return 'Pulling your ledger…'
+  if (n.includes('tax') || n.includes('gain')) return 'Preparing your tax report…'
+  if (n.includes('contract') || n.includes('note')) return 'Looking up your notes…'
+  return 'Working on it…'
 }
 
 /** Intro copy for the help card, by kind. */
