@@ -23,6 +23,6 @@ Out of scope: a confirm dialog (restart is instant; the old thread is retained s
 
 ## Impact
 
-- Backend: `app/agent/router.py` (+reset route), `app/agent/store.py` (`reset_thread`, latest-thread rehydration query). No model calls, no new tables (threads already keys by id, not session).
+- Backend: `app/agent/router.py` (+reset route), `app/agent/store.py` (`reset_thread`, latest-thread rehydration query), `app/agent/schema.sql` (drop the CHO-213 `UNIQUE(session_id)` constraint — discovered live: it enforced one-thread-per-session and silently rejected the fresh thread's insert — plus a `(session_id, created_at DESC)` index for latest-thread rehydration; idempotent migration statements applied to the dev DB). No model calls, no new tables.
 - Frontend: `App.tsx` (pill swap + restart wiring + shell remount key), `ChatShell.tsx` (engagement callback, stream-abort on unmount). What's New modal/hook untouched.
 - PII/compliance: unchanged — reset stores nothing new; old threads retain their existing content under the existing retention rule.

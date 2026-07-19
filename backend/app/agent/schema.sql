@@ -76,11 +76,13 @@ CREATE TABLE IF NOT EXISTS prompt_snapshots (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- One thread per widget session. `id` is app-generated (uuid4) so thread
--- creation never needs a DB round-trip on the chat path.
+-- Threads of a widget session. `id` is app-generated (uuid4) so thread
+-- creation never needs a DB round-trip on the chat path. A session id maps
+-- to MANY thread rows over time (CHO-216: Restart closes the current thread
+-- and starts a fresh one); the session's live thread is its newest row.
 CREATE TABLE IF NOT EXISTS threads (
     id             UUID PRIMARY KEY,
-    session_id     TEXT NOT NULL UNIQUE,
+    session_id     TEXT NOT NULL,
     client_code    TEXT,
     status         TEXT NOT NULL DEFAULT 'active'
                    CHECK (status IN ('active', 'resolved', 'escalated', 'expired')),
@@ -88,6 +90,13 @@ CREATE TABLE IF NOT EXISTS threads (
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_active_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- CHO-216 migration for databases created before restart support: the
+-- original DDL declared session_id UNIQUE (one thread per session).
+ALTER TABLE threads DROP CONSTRAINT IF EXISTS threads_session_id_key;
+-- Latest-thread rehydration path: WHERE session_id ORDER BY created_at DESC.
+CREATE INDEX IF NOT EXISTS threads_session_latest_idx
+    ON threads (session_id, created_at DESC);
 
 -- One row per step boundary. `role` is wire-faithful (tool results ride in
 -- user-role turns); `kind` disambiguates. `content` is the exact Anthropic
