@@ -11,19 +11,23 @@ The widget SHALL present a single scrolling conversation. The greeting + quick-a
 - **THEN** the greeting + stickers animate away and the flow continues inline as messages
 
 ### Requirement: Pinned composer with keyword routing
-A composer SHALL remain pinned and usable at every point, including after a flow completes. Submitting text SHALL route by keyword to the matching flow — file flows (P&L, ledger, capital gains, contract notes) and data flows (holdings/portfolio, pay-in/pay-out/deposit/withdraw, brokerage/charges/slab) — or, if unmatched, reply with the available actions including the data flows. (Full natural-language understanding is a later change.)
+A composer SHALL remain pinned and usable at every point, including after a flow completes. Submitting text SHALL send the message to the agent (`POST /api/chat` with the session's auth headers), consume the SSE response, and render the agent's reply incrementally as `text` deltas arrive; artifacts SHALL render as their `artifact` events arrive using the existing renderers — file artifacts as the standard download card (via `fileToken`), data artifacts as the standard data cards. Before the first delta and during tool rounds (`tool` events), the shell SHALL show a progress/typing state. Keyword routing is retained only as the degraded fallback: if the agent responds `AGENT_UNAVAILABLE`, the shell SHALL route by keyword to the matching flow — file flows (P&L, ledger, capital gains, contract notes) and data flows (holdings/portfolio, pay-in/pay-out/deposit/withdraw, brokerage/charges/slab) — or, if unmatched, reply with the available actions including the data flows.
 
-#### Scenario: Text routes to a flow
-- **WHEN** the user types a message matching a known report
-- **THEN** that flow starts inline
+#### Scenario: Free text answered by the agent
+- **WHEN** the user types "what are the DP charges?"
+- **THEN** the message posts to `/api/chat` and the agent's answer streams into a bot message as it generates
 
-#### Scenario: Data-flow keywords route
-- **WHEN** the user types "my portfolio", "did my deposit land" or "what's my brokerage"
-- **THEN** the holdings, money, or brokerage flow starts inline
+#### Scenario: Report produced through chat
+- **WHEN** the agent's response includes a file artifact
+- **THEN** the shell renders the existing download card wired to the artifact's fileToken
 
-#### Scenario: Unmatched text
-- **WHEN** the user types something with no matching flow
-- **THEN** the bot replies with the available report and data actions
+#### Scenario: Agent asks a clarifying question
+- **WHEN** the agent's reply is a question about missing parameters
+- **THEN** it renders as a normal bot message and the composer remains ready for the user's answer
+
+#### Scenario: Agent unavailable falls back to keyword routing
+- **WHEN** `/api/chat` returns `{"error": "AGENT_UNAVAILABLE"}`
+- **THEN** the shell routes the same text by keyword to a matching flow, or replies with the available report and data actions if unmatched
 
 ### Requirement: Narrated generation
 While a report is being produced, the shell SHALL show a sequence of short progress captions specific to the flow (e.g. "Pulling your trades… → Tallying charges… → Sealing with your PAN…") rather than a generic spinner.
