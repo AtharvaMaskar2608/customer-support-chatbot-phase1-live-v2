@@ -8,6 +8,7 @@ StreamingResponse. Failures after the stream opens are SSE `error` events
 """
 
 import logging
+from typing import Literal
 
 from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -29,6 +30,16 @@ class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     message: str = Field(min_length=1, max_length=4000)
+
+
+class FeedbackRequest(BaseModel):
+    # extra="ignore", same IDOR posture as ChatRequest: only the rating,
+    # anchor, and source are read — nothing else in the body is trusted.
+    model_config = ConfigDict(extra="ignore")
+
+    rating: Literal["up", "down"]
+    anchorSeq: int | None = Field(default=None, ge=1)
+    source: str = Field(default="agent", max_length=32)
 
 
 def _missing_credentials() -> JSONResponse:
@@ -68,6 +79,36 @@ async def chat_reset(
         return _missing_credentials()
     await request.app.state.conversation_store.reset_thread(
         x_session_id, client_code=x_user_id
+    )
+    return {"ok": True}
+
+
+@router.post("/api/feedback")
+async def feedback(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    x_session_id: str | None = Header(default=None),
+    x_user_id: str | None = Header(default=None),
+):
+    """Record a 👍/👎 on a completed answer (CHO-217): anchored to the given
+    turn seq (agent path) or the thread's latest turn (sticker path). The
+    write rides the store's queue — no model call, no DB wait, and degraded
+    persistence never surfaces to the user."""
+    if not authorization or not x_session_id or not x_user_id:
+        return _missing_credentials()
+    try:
+        body = FeedbackRequest.model_validate(await request.json())
+    except Exception:
+        # Malformed JSON or invalid rating/anchor — plain 400, no echo of the
+        # body (nothing user-supplied is logged or reflected).
+        return JSONResponse(status_code=400, content={"error": "INVALID_FEEDBACK"})
+    store = request.app.state.conversation_store
+    thread = await store.get_thread(x_session_id, client_code=x_user_id)
+    anchor_seq = body.anchorSeq or (thread.turns[-1].seq if thread.turns else None)
+    if anchor_seq is None:
+        return {"ok": True}  # empty thread — nothing to anchor a rating to
+    store.record_feedback(
+        thread, anchor_seq=anchor_seq, rating=body.rating, source=body.source
     )
     return {"ok": True}
 

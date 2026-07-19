@@ -16,7 +16,10 @@
  *                         "flowKey"?: "pnl"|"ledger"|"tax"|"contract-notes"}
  *                        {"kind": "data", "tool": "get_holdings"|"get_money"|
  *                         "get_brokerage", ...ok-payload fields spread here}
- *       event: done      {"thread": {"taskTurns": n, "sessionTurns": n}}  — terminal
+ *       event: done      {"thread": {"taskTurns": n, "sessionTurns": n,
+ *                         "lastSeq": n}}                     — terminal; lastSeq
+ *                        is the exchange's last stored turn seq (CHO-217
+ *                        feedback anchor)
  *       event: error     {"error": "AGENT_UNAVAILABLE"|"AUTH_EXPIRED"}    — terminal
  *
  *   Pre-stream failures — HTTP 400 {"error":"MISSING_CREDENTIALS"} or any
@@ -79,7 +82,9 @@ export interface AgentFlowArtifact {
 export type AgentArtifact = AgentFileArtifact | AgentDataArtifact | AgentFlowArtifact
 
 export interface AgentDoneEvent {
-  thread: { taskTurns: number; sessionTurns: number }
+  /** `lastSeq` — the exchange's last stored turn seq, the CHO-217 feedback
+   *  anchor the shell stamps onto the answer messages it just rendered. */
+  thread: { taskTurns: number; sessionTurns: number; lastSeq: number }
 }
 
 export type AgentErrorCode = 'AGENT_UNAVAILABLE' | 'AUTH_EXPIRED'
@@ -122,7 +127,13 @@ function parseArtifact(x: unknown): AgentArtifact | null {
 function parseDone(x: unknown): AgentDoneEvent {
   const thread = asRecord(asRecord(x)?.thread) ?? {}
   const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
-  return { thread: { taskTurns: num(thread.taskTurns), sessionTurns: num(thread.sessionTurns) } }
+  return {
+    thread: {
+      taskTurns: num(thread.taskTurns),
+      sessionTurns: num(thread.sessionTurns),
+      lastSeq: num(thread.lastSeq),
+    },
+  }
 }
 
 function parseErrorCode(x: unknown): AgentErrorCode {

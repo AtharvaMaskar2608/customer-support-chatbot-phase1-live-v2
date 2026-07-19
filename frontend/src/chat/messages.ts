@@ -21,8 +21,10 @@ export type Message =
   /** Bot text line; `**bold**` marks emphasis (see RichText). */
   | { id: string; kind: 'bot'; text: string }
   /** Streaming agent reply — grows in place as SSE text deltas arrive.
-   *  Rendered like `bot`, plus pre-wrap so the model's paragraphs survive. */
-  | { id: string; kind: 'agent'; text: string }
+   *  Rendered like `bot`, plus pre-wrap so the model's paragraphs survive.
+   *  `anchorSeq` (stamped from done.lastSeq onto the exchange-final bubble)
+   *  gates the feedback chip; `feedback` is the optimistic rating (CHO-217). */
+  | { id: string; kind: 'agent'; text: string; anchorSeq?: number; feedback?: 'up' | 'down' }
   /** Transient "typing…" dots. */
   | { id: string; kind: 'typing' }
   /** The available-actions sticker row (unmatched composer text). */
@@ -45,8 +47,19 @@ export type Message =
       /** Whether the "Email it" affordance applies (false for contract notes,
        *  which have no email delivery). Absent ⇒ emailable. */
       emailable?: boolean
+      /** Feedback anchor (agent-path cards only; sticker-path cards submit
+       *  without one) + the optimistic rating (CHO-217). */
+      anchorSeq?: number
+      feedback?: 'up' | 'down'
     }
-  | { id: string; kind: 'email'; noun: string; emailMasked: string }
+  | {
+      id: string
+      kind: 'email'
+      noun: string
+      emailMasked: string
+      anchorSeq?: number
+      feedback?: 'up' | 'down'
+    }
   /** Contract-notes selection step: the month-grouped tap-to-get list. */
   | {
       id: string
@@ -64,7 +77,14 @@ export type Message =
   | { id: string; kind: 'ticket'; ticketId: string }
   /** A rendered data card (the answer in the chat). `data` is the payload the
    *  flow's fetch produced; its Card component narrows it. */
-  | { id: string; kind: 'datacard'; flowKey: string; data: unknown }
+  | {
+      id: string
+      kind: 'datacard'
+      flowKey: string
+      data: unknown
+      anchorSeq?: number
+      feedback?: 'up' | 'down'
+    }
   /** Calm empty-state card for a data flow (kind "empty" from the backend). */
   | { id: string; kind: 'dataEmpty'; flowKey: string }
   /** Follow-up line under a data card (help affordance). */

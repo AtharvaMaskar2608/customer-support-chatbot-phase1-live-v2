@@ -174,7 +174,8 @@ def test_end_turn_streams_text_and_terminates(app):
         events = _parse_events(resp)
         assert events == [
             ("text", {"delta": "Hello! How can I help you today?"}),
-            ("done", {"thread": {"taskTurns": 1, "sessionTurns": 1}}),
+            # lastSeq: user_text(1) + assistant_text(2) — the feedback anchor
+            ("done", {"thread": {"taskTurns": 1, "sessionTurns": 1, "lastSeq": 2}}),
         ]
 
         # one model call, correctly assembled
@@ -370,7 +371,7 @@ def test_clarify_cap_trips_and_injects_escalation(app):
         assert fake.calls[0]["messages"][-1]["content"][0]["text"] == reminders[0]
         assert "<system-reminder>" not in json.dumps(thread.messages())
         assert events[-1] == (
-            "done", {"thread": {"taskTurns": 3, "sessionTurns": 3}},
+            "done", {"thread": {"taskTurns": 3, "sessionTurns": 3, "lastSeq": 6}},
         )
 
 
@@ -402,7 +403,7 @@ def test_resolution_event_resets_task_counters(app):
         assert _reminder_texts(fake.calls[0]) == []  # counters were reset
         # fresh task window: 1 user turn since resolution; session total 4
         assert events[-1] == (
-            "done", {"thread": {"taskTurns": 1, "sessionTurns": 4}},
+            "done", {"thread": {"taskTurns": 1, "sessionTurns": 4, "lastSeq": 10}},
         )
 
 
@@ -428,7 +429,7 @@ def test_session_backstop_trips_at_twenty_user_messages(app, monkeypatch):
 
         assert len(_reminder_texts(fake.calls[0])) == 1  # backstop tripped
         assert events[-1] == (
-            "done", {"thread": {"taskTurns": 1, "sessionTurns": 20}},
+            "done", {"thread": {"taskTurns": 1, "sessionTurns": 20, "lastSeq": 59}},
         )
 
 
@@ -659,8 +660,11 @@ def test_open_report_form_emits_flow_artifact_and_resolves(app):
     assert artifacts == [
         {"kind": "flow", "flowKey": "pnl", "seed": {"segment": "Equity"}}
     ]
-    # Resolution: the successful form-open resets the task window.
-    assert events[-1] == ("done", {"thread": {"taskTurns": 0, "sessionTurns": 1}})
+    # Resolution: the successful form-open resets the task window. lastSeq on
+    # the CHO-215 short-circuit path too: user(1) + tool_use(2) + result(3).
+    assert events[-1] == (
+        "done", {"thread": {"taskTurns": 0, "sessionTurns": 1, "lastSeq": 3}},
+    )
 
 
 def test_open_report_form_drops_invalid_seed_values(app):
@@ -842,5 +846,101 @@ def test_chat_reset_gives_blank_slate(app):
         "role": "user", "content": [{"type": "text", "text": "hello"}],
     }
     assert "only care about" not in json.dumps(messages)  # old turn is gone
-    # Counters restarted with the fresh thread.
-    assert events[-1] == ("done", {"thread": {"taskTurns": 1, "sessionTurns": 1}})
+    # Counters (and the feedback anchor) restarted with the fresh thread.
+    assert events[-1] == (
+        "done", {"thread": {"taskTurns": 1, "sessionTurns": 1, "lastSeq": 2}},
+    )
+
+
+# --- answer feedback endpoint (CHO-217) ----------------------------------------
+
+
+def _feedback_jobs(app):
+    """Drain the store queue (writer never runs in the memory-only fixture)
+    and return the feedback jobs it held."""
+    store = app.state.conversation_store
+    jobs = []
+    while True:
+        try:
+            jobs.append(store._queue.get_nowait())
+        except asyncio.QueueEmpty:
+            break
+    return [job for job in jobs if job[0] == "feedback"]
+
+
+def test_feedback_requires_credentials(app):
+    with TestClient(app) as client:
+        resp = client.post("/api/feedback", json={"rating": "up"})
+    assert resp.status_code == 400
+    assert resp.json() == {"error": "MISSING_CREDENTIALS"}
+
+
+def test_feedback_invalid_body_is_400(app):
+    with TestClient(app) as client:
+        for body in (
+            {"rating": "sideways"},                 # not up|down
+            {"rating": "up", "anchorSeq": 0},       # anchor below 1
+            {"rating": "up", "anchorSeq": "three"}, # non-int anchor
+            {},                                     # rating missing
+        ):
+            resp = client.post("/api/feedback", headers=HEADERS, json=body)
+            assert resp.status_code == 400
+            assert resp.json() == {"error": "INVALID_FEEDBACK"}
+        assert _feedback_jobs(app) == []  # nothing stored
+
+
+def test_feedback_happy_path_stores_given_anchor(app):
+    """Agent path: the shell's anchorSeq (from done.lastSeq) is stored as-is;
+    the write is a ("feedback", row) job on the store's writer queue."""
+    with TestClient(app) as client:
+        thread = _get_thread(app)
+        _append(app, thread, role="user", kind="user_text", text="hi")
+        _append(app, thread, role="assistant", kind="assistant_text", text="hello")
+        store = app.state.conversation_store
+        store._pool = object()  # writer not running → jobs stay inspectable
+        resp = client.post(
+            "/api/feedback",
+            headers=HEADERS,
+            json={"rating": "up", "anchorSeq": 2, "source": "agent"},
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True}
+        assert _feedback_jobs(app) == [
+            ("feedback", {"thread_id": thread.id, "anchor_seq": 2,
+                          "rating": "up", "source": "agent"})
+        ]
+
+
+def test_feedback_anchors_to_latest_turn_when_seq_omitted(app):
+    """Sticker path: no anchorSeq → the thread's latest turn (post-CHO-214,
+    the flow-event memo of exactly the rated completion) anchors the row."""
+    with TestClient(app) as client:
+        thread = _get_thread(app)
+        _append(app, thread, role="user", kind="user_text", text="my pnl")
+        _append(app, thread, role="assistant", kind="assistant_text",
+                text="Here's the form.")
+        _append(app, thread, role="user", kind="flow_event",
+                content=[{"type": "text", "text": "[App event] P&L done"}],
+                meta={"flow": "pnl"})
+        store = app.state.conversation_store
+        store._pool = object()
+        resp = client.post(
+            "/api/feedback", headers=HEADERS,
+            json={"rating": "down", "source": "flow"},
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True}
+        assert _feedback_jobs(app) == [
+            ("feedback", {"thread_id": thread.id, "anchor_seq": 3,
+                          "rating": "down", "source": "flow"})
+        ]
+
+
+def test_feedback_on_empty_thread_is_ok_and_stores_nothing(app):
+    with TestClient(app) as client:
+        _get_thread(app)  # fresh thread, zero turns — nothing to anchor
+        app.state.conversation_store._pool = object()
+        resp = client.post("/api/feedback", headers=HEADERS, json={"rating": "up"})
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True}
+        assert _feedback_jobs(app) == []
