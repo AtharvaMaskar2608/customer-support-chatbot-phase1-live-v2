@@ -200,7 +200,7 @@ async function readSse(
 /* ── the client ───────────────────────────────────────────────────────── */
 
 /** Same credential triple as the report/data fetches. Raw JWT — no "Bearer". */
-function authHeaders(session: SessionContext): Record<string, string> {
+export function authHeaders(session: SessionContext): Record<string, string> {
   return {
     Authorization: session.accessToken!,
     'X-Session-Id': session.sessionId!,

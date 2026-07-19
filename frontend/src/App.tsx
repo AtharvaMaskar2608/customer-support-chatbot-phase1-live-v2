@@ -5,17 +5,23 @@ import { getSessionContext, hasCredentials } from './session'
 import { useGreeting } from './useGreeting'
 import { useWhatsNew } from './useWhatsNew'
 import { WhatsNewModal } from './WhatsNewModal'
+import { authHeaders } from './chat/agent'
 import { ChatShell } from './chat/ChatShell'
 
 function Header({
   userId,
+  engaged,
   whatsNewDot,
   onWhatsNew,
+  onRestart,
   onBack,
 }: Readonly<{
   userId: string | null
+  /** Conversation running → the pill slot shows Restart instead (CHO-216). */
+  engaged: boolean
   whatsNewDot: boolean
   onWhatsNew: () => void
+  onRestart: () => void
   onBack?: () => void
 }>) {
   return (
@@ -48,22 +54,34 @@ function Header({
         </p>
       </div>
 
-      <button
-        type="button"
-        aria-haspopup="dialog"
-        onClick={onWhatsNew}
-        // Dark pill on light header; inverted to a light elevated pill in
-        // dark mode so it stays clearly visible on the near-black header.
-        className="relative shrink-0 rounded-full bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white dark:bg-zinc-100 dark:text-zinc-900"
-      >
-        <span>✨ What's new</span>
-        {whatsNewDot && (
-          <span
-            aria-hidden="true"
-            className="absolute -top-px -right-px size-2 rounded-full bg-alert ring-2 ring-white dark:ring-zinc-900"
-          />
-        )}
-      </button>
+      {engaged ? (
+        // Same pill slot: once a conversation kicks off, Restart takes over.
+        // No unseen dot here — that belongs to What's New only.
+        <button
+          type="button"
+          onClick={onRestart}
+          className="relative shrink-0 rounded-full bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white dark:bg-zinc-100 dark:text-zinc-900"
+        >
+          <span>↻ Restart</span>
+        </button>
+      ) : (
+        <button
+          type="button"
+          aria-haspopup="dialog"
+          onClick={onWhatsNew}
+          // Dark pill on light header; inverted to a light elevated pill in
+          // dark mode so it stays clearly visible on the near-black header.
+          className="relative shrink-0 rounded-full bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white dark:bg-zinc-100 dark:text-zinc-900"
+        >
+          <span>✨ What's new</span>
+          {whatsNewDot && (
+            <span
+              aria-hidden="true"
+              className="absolute -top-px -right-px size-2 rounded-full bg-alert ring-2 ring-white dark:ring-zinc-900"
+            />
+          )}
+        </button>
+      )}
     </header>
   )
 }
@@ -76,9 +94,28 @@ export default function App() {
   const whatsNew = useWhatsNew()
   const [whatsNewOpen, setWhatsNewOpen] = useState(false)
 
+  // CHO-216: conversation state drives the header pill; Restart bumps the
+  // shell key (full remount = every message/stream/ref resets by
+  // construction) and asks the backend for a fresh agent thread.
+  const [engaged, setEngaged] = useState(false)
+  const [shellKey, setShellKey] = useState(0)
+
   function closeWhatsNew() {
     whatsNew.markSeen()
     setWhatsNewOpen(false)
+  }
+
+  function handleRestart() {
+    setEngaged(false)
+    setShellKey((k) => k + 1)
+    if (hasCredentials(session)) {
+      // Fire-and-forget: the home screen appears immediately; a failed reset
+      // degrades to the next message continuing the old thread — never blocks.
+      void fetch('/api/chat/reset', {
+        method: 'POST',
+        headers: authHeaders(session),
+      }).catch(() => {})
+    }
   }
 
   return (
@@ -89,17 +126,24 @@ export default function App() {
       <main className="mx-auto flex h-dvh w-full max-w-[480px] flex-col">
         <Header
           userId={userId}
+          engaged={engaged}
           whatsNewDot={whatsNew.hasUnseen}
           onWhatsNew={() => {
             // Content unavailable -> pill is a graceful no-op.
             if (whatsNew.items !== null) setWhatsNewOpen(true)
           }}
+          onRestart={handleRestart}
           // Inside the website's corner panel the back arrow closes the
           // panel; on app webviews the host owns navigation (no-op).
           onBack={session.platform === 'web' ? postCloseToHost : undefined}
         />
 
-        <ChatShell session={session} firstName={firstName} />
+        <ChatShell
+          key={shellKey}
+          session={session}
+          firstName={firstName}
+          onEngaged={() => setEngaged(true)}
+        />
       </main>
 
       {whatsNewOpen && whatsNew.items !== null && (
