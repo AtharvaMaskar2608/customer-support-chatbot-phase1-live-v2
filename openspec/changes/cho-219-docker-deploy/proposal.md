@@ -8,7 +8,7 @@ Phase 1 is feature-complete on main but only runs on dev machines. The team alre
 
 - **`backend/Dockerfile`**: uv-based image running uvicorn on :8000; secrets arrive exclusively via env (compose `env_file`) — no `.env` in the image, `.dockerignore` excludes it defensively.
 - **`frontend/Dockerfile` + `nginx.conf`**: node build stage (tsc + both Vite entries — a type error fails the build) → nginx serving the chat page and `widget.js`, with `/api` proxied same-origin to the backend service and **proxy buffering off** (the chat endpoint is SSE; any buffering hop destroys streaming).
-- **`docker-compose.yml` joins the repo**: tags bumped to `backendv1.0.3` / `frontendv1.0.1` for this codebase; the old images' `API_PREFIX`/`API_BASE` env vars removed (this codebase reads neither — routes are natively under `/api` and the frontend calls relative paths).
+- **`docker-compose.yml` joins the repo**: tags bumped to `backendv1.0.3` / `frontendv1.0.2` for this codebase; the old images' `API_PREFIX`/`API_BASE` env vars removed (this codebase reads neither — routes are natively under `/api` and the frontend calls relative paths).
 - **`docs/deployment.md`**: the complete run-book — build, push, server `.env` requirements, run, verification, the production embed snippet (`widget.js` + `ChoiceJini.init`), the version-bump release loop, and troubleshooting (incl. the SSE-buffering trap and the current IAM push blocker).
 
 ## Capabilities

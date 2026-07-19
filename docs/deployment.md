@@ -32,7 +32,7 @@ Version scheme: bump the component's tag by one and mirror the new tag in
 
 ```bash
 docker build -t 829433345651.dkr.ecr.ap-south-1.amazonaws.com/customer-support-chatbot:backendv1.0.3  backend/
-docker build -t 829433345651.dkr.ecr.ap-south-1.amazonaws.com/customer-support-chatbot:frontendv1.0.1 frontend/
+docker build -t 829433345651.dkr.ecr.ap-south-1.amazonaws.com/customer-support-chatbot:frontendv1.0.2 frontend/
 ```
 
 The frontend build runs `tsc` + both Vite entries inside the image — a type
@@ -60,7 +60,7 @@ On the real server, use a DSN reachable from the server itself.
 aws ecr get-login-password --region ap-south-1 \
   | docker login --username AWS --password-stdin 829433345651.dkr.ecr.ap-south-1.amazonaws.com
 docker push 829433345651.dkr.ecr.ap-south-1.amazonaws.com/customer-support-chatbot:backendv1.0.3
-docker push 829433345651.dkr.ecr.ap-south-1.amazonaws.com/customer-support-chatbot:frontendv1.0.1
+docker push 829433345651.dkr.ecr.ap-south-1.amazonaws.com/customer-support-chatbot:frontendv1.0.2
 ```
 
 ## 4. Run on the server
