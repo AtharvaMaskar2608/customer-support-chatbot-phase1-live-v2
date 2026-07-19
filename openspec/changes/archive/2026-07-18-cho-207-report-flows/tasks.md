@@ -50,4 +50,4 @@ Groups 1–4 are the Wave-0 foundation and are sequential-ish (engine + backend 
 
 ## 7. Wave-1 hand-off (parallel follow-on changes)
 
-- [ ] 7.1 Freeze the descriptor schema; open `cho-###` changes for **Ledger** (Normal/MTF + date + delivery), **Capital Gains/Tax** (FinYear + PDF/Excel + delivery), **Contract Notes** (date → list → select → download); each fans out to its own worktree/agent
+- [x] 7.1 Freeze the descriptor schema; open `cho-###` changes for **Ledger** (Normal/MTF + date + delivery), **Capital Gains/Tax** (FinYear + PDF/Excel + delivery), **Contract Notes** (date → list → select → download); each fans out to its own worktree/agent — shipped as CHO-208/209/210 (PR #3)
