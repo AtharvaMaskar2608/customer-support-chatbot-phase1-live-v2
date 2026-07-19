@@ -284,6 +284,7 @@ async def _chat_events(
                     for block in tool_uses
                 )
             )
+            artifacts: list[dict | None] = []
             for block, outcome in zip(tool_uses, outcomes):
                 yield _sse(
                     "tool",
@@ -294,6 +295,7 @@ async def _chat_events(
                     },
                 )
                 artifact = _artifact_payload(block["name"], outcome)
+                artifacts.append(artifact)
                 if artifact is not None:
                     yield _sse("artifact", artifact)
                 if outcome.error_code == CODE_AUTH_EXPIRED:
@@ -316,6 +318,28 @@ async def _chat_events(
                         "duration_ms": outcome.duration_ms,
                     },
                 )
+            # CHO-215: the artifact IS the answer. When every call succeeded
+            # and every one produced an artifact (form/data/file card), end
+            # the turn — no continuation model call, no narration. Any round
+            # with an error or a narration-needing success (KB, note list)
+            # continues to the model as before. auth_expired is unreachable
+            # here (auth expiry is an error result).
+            if (
+                outcomes
+                and all(not o.is_error for o in outcomes)
+                and all(a is not None for a in artifacts)
+            ):
+                counters = agent_caps.evaluate(thread)
+                yield _sse(
+                    "done",
+                    {
+                        "thread": {
+                            "taskTurns": counters.task_user_turns,
+                            "sessionTurns": counters.session_user_turns,
+                        }
+                    },
+                )
+                return
             continue
 
         # Terminal: end_turn (or any non-tool stop). Exactly one terminal

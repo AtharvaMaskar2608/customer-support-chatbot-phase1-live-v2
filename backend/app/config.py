@@ -266,12 +266,12 @@ def clarify_cap() -> int:
 
 def task_turn_cap() -> int:
     """Max user turns per task window (TASK_TURN_CAP env)."""
-    return int(os.environ.get("TASK_TURN_CAP", "10"))
+    return int(os.environ.get("TASK_TURN_CAP", "100"))
 
 
 def session_turn_cap() -> int:
     """Max user turns per session — the dumb backstop (SESSION_TURN_CAP env)."""
-    return int(os.environ.get("SESSION_TURN_CAP", "20"))
+    return int(os.environ.get("SESSION_TURN_CAP", "100"))
 
 
 def agent_max_tool_rounds() -> int:

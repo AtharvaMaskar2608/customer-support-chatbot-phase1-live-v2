@@ -241,22 +241,26 @@ def test_parallel_tool_use_answered_in_one_user_message(app, monkeypatch):
         )
 
     monkeypatch.setattr("app.agent.tools.dispatch_outcome", fake_dispatch)
+    # Narration tools (KB + note list) — artifact tools would short-circuit
+    # (CHO-215) and this test's wire-shape assertion needs the second call.
     fake = FakeAnthropic([
         _tool_msg(
-            _tool_use("get_holdings", block_id="tu_1"),
-            _tool_use("get_brokerage_rates", block_id="tu_2"),
+            _tool_use("search_knowledge_base", block_id="tu_1"),
+            _tool_use("list_contract_notes", block_id="tu_2"),
         ),
         _text_msg("Here's both."),
     ])
     with TestClient(app) as client:
         app.state.anthropic_client = fake
-        resp = _post_chat(client, "holdings and brokerage please")
+        resp = _post_chat(client, "charges info and my notes please")
         events = _parse_events(resp)
 
-        assert sorted(executed) == ["get_brokerage_rates", "get_holdings"]
+        assert sorted(executed) == ["list_contract_notes", "search_knowledge_base"]
         started = [d for e, d in events if e == "tool" and d["status"] == "started"]
         finished = [d for e, d in events if e == "tool" and d["status"] == "finished"]
-        assert [d["name"] for d in started] == ["get_holdings", "get_brokerage_rates"]
+        assert [d["name"] for d in started] == [
+            "search_knowledge_base", "list_contract_notes",
+        ]
         assert all(d["is_error"] is False for d in started + finished)
 
         # both tool_results ride in ONE user message on the wire
@@ -273,7 +277,8 @@ def test_parallel_tool_use_answered_in_one_user_message(app, monkeypatch):
             "tool_result", "tool_result", "assistant_text",
         ]
         assert thread.turns[2].meta == {
-            "duration_ms": 2, "is_error": False, "tool_name": "get_holdings",
+            "duration_ms": 2, "is_error": False,
+            "tool_name": "search_knowledge_base",
         }
 
 
@@ -401,7 +406,8 @@ def test_resolution_event_resets_task_counters(app):
         )
 
 
-def test_session_backstop_trips_at_twenty_user_messages(app):
+def test_session_backstop_trips_at_twenty_user_messages(app, monkeypatch):
+    monkeypatch.setenv("SESSION_TURN_CAP", "20")  # default is 100 (CHO-215)
     fake = FakeAnthropic([_text_msg("Here's an answer — or I can get a human.")])
     with TestClient(app) as client:
         app.state.anthropic_client = fake
@@ -433,8 +439,10 @@ def test_tool_round_guard_forces_wrapup_call(app, monkeypatch):
     monkeypatch.setattr(
         "app.agent.tools.dispatch_outcome", _ok_outcome({"kind": "ok"})
     )
+    # A narration tool (KB) — artifact tools would short-circuit (CHO-215)
+    # and never reach the guard.
     fake = FakeAnthropic(
-        [_tool_msg(_tool_use("get_holdings", block_id=f"tu_{i}"))
+        [_tool_msg(_tool_use("search_knowledge_base", block_id=f"tu_{i}"))
          for i in range(5)]
         + [_text_msg("Here's what I found so far.")]
     )
@@ -457,19 +465,21 @@ def test_tool_round_guard_forces_wrapup_call(app, monkeypatch):
 
 
 def test_sse_ordering_text_tool_artifact_done(app, monkeypatch):
+    """CHO-215: an artifact-only round ends the turn — the card is the
+    answer, so no continuation model call and no trailing narration."""
     envelope = {"kind": "ok", "rows": [{"sym": "TCS"}], "totals": {"count": 1}}
     monkeypatch.setattr("app.agent.tools.dispatch_outcome", _ok_outcome(envelope))
     fake = FakeAnthropic([
         _tool_msg(_tool_use("get_holdings"), text="Let me pull that up."),
-        _text_msg("You hold 1 stock."),
     ])
     with TestClient(app) as client:
         app.state.anthropic_client = fake
         resp = _post_chat(client, "my holdings")
         events = _parse_events(resp)
 
+    assert len(fake.calls) == 1  # no continuation call after the artifact
     assert [e for e, _ in events] == [
-        "text", "tool", "tool", "artifact", "text", "done",
+        "text", "tool", "tool", "artifact", "done",
     ]
     artifact = dict(events)["artifact"]
     # data artifact: envelope fields spread at top level, its "kind" dropped
@@ -550,13 +560,15 @@ def test_anthropic_failure_midway_still_terminates_with_error(app, monkeypatch):
     monkeypatch.setattr(
         "app.agent.tools.dispatch_outcome", _ok_outcome({"kind": "ok"})
     )
+    # KB (narration) tool: an artifact round would short-circuit (CHO-215)
+    # and never make the failing second call this test is about.
     fake = FakeAnthropic([
-        _tool_msg(_tool_use("get_holdings")),
+        _tool_msg(_tool_use("search_knowledge_base")),
         RuntimeError("api down mid-loop"),
     ])
     with TestClient(app) as client:
         app.state.anthropic_client = fake
-        events = _parse_events(_post_chat(client, "holdings"))
+        events = _parse_events(_post_chat(client, "what are DP charges?"))
     terminals = [e for e, _ in events if e in ("done", "error")]
     assert terminals == ["error"]
     assert events[-1] == ("error", {"error": "AGENT_UNAVAILABLE"})
@@ -669,10 +681,11 @@ def test_open_report_form_drops_invalid_seed_values(app):
     assert artifacts == [{"kind": "flow", "flowKey": "pnl", "seed": {}}]
 
 
-def test_session_backstop_alone_injects_soft_reminder(app):
+def test_session_backstop_alone_injects_soft_reminder(app, monkeypatch):
     """CHO-214 · D6: a long session with no current-task struggle gets the
     conditional instruction — a fresh, clean query must not be told the
     conversation has been 'going back and forth'."""
+    monkeypatch.setenv("SESSION_TURN_CAP", "20")  # default is 100 (CHO-215)
     fake = FakeAnthropic([_text_msg("Here's your answer.")])
     with TestClient(app) as client:
         app.state.anthropic_client = fake
@@ -716,3 +729,80 @@ def test_clarify_trip_still_injects_mandatory_reminder(app):
         assert len(reminders) == 1
         assert "Conversation limit reached" in reminders[0]
         assert "clarifying question" in reminders[0]
+
+
+# --- artifact-only rounds end the turn (CHO-215) ------------------------------
+
+
+def test_data_artifact_round_short_circuits(app, monkeypatch):
+    """The card is the answer: one model call, no narration after the card."""
+    envelope = {"kind": "ok", "clusters": [{"rate": "0.01%"}]}
+    monkeypatch.setattr("app.agent.tools.dispatch_outcome", _ok_outcome(envelope))
+    fake = FakeAnthropic([_tool_msg(_tool_use("get_brokerage_rates"))])
+    with TestClient(app) as client:
+        app.state.anthropic_client = fake
+        events = _parse_events(_post_chat(client, "what is my brokerage?"))
+
+    assert len(fake.calls) == 1
+    assert [e for e, _ in events] == ["tool", "tool", "artifact", "done"]
+    assert not [e for e, _ in events if e == "text"]
+
+
+def test_parallel_two_artifact_round_short_circuits(app, monkeypatch):
+    envelope = {"kind": "ok", "rows": []}
+    monkeypatch.setattr("app.agent.tools.dispatch_outcome", _ok_outcome(envelope))
+    fake = FakeAnthropic([
+        _tool_msg(
+            _tool_use("get_holdings", block_id="tu_a"),
+            _tool_use("get_brokerage_rates", block_id="tu_b"),
+        ),
+    ])
+    with TestClient(app) as client:
+        app.state.anthropic_client = fake
+        events = _parse_events(_post_chat(client, "holdings and brokerage"))
+
+    assert len(fake.calls) == 1
+    artifacts = [d for e, d in events if e == "artifact"]
+    assert len(artifacts) == 2
+    assert events[-1][0] == "done"
+
+
+def test_mixed_artifact_and_kb_round_still_narrates(app, monkeypatch):
+    """A round with a narration-needing success (KB) continues to the model."""
+    envelope = {"kind": "ok", "results": [{"answer": "AMC is yearly."}]}
+    monkeypatch.setattr("app.agent.tools.dispatch_outcome", _ok_outcome(envelope))
+    fake = FakeAnthropic([
+        _tool_msg(
+            _tool_use("get_holdings", block_id="tu_a"),
+            _tool_use("search_knowledge_base", block_id="tu_b"),
+        ),
+        _text_msg("Here's what AMC means for your account."),
+    ])
+    with TestClient(app) as client:
+        app.state.anthropic_client = fake
+        events = _parse_events(_post_chat(client, "holdings and what is AMC?"))
+
+    assert len(fake.calls) == 2  # continuation still happens
+    assert [d for e, d in events if e == "artifact"]  # holdings card emitted
+    assert "".join(d["delta"] for e, d in events if e == "text")
+    assert events[-1][0] == "done"
+
+
+def test_short_circuited_turn_continues_cleanly(app):
+    """After a silent form-open, the next message replays a valid array:
+    the trailing tool_result merges ahead of the new user text."""
+    fake = FakeAnthropic([
+        _tool_msg(_tool_use("open_report_form", {"flow": "pnl"})),
+        _text_msg("Answering the follow-up."),
+    ])
+    with TestClient(app) as client:
+        app.state.anthropic_client = fake
+        _parse_events(_post_chat(client, "get my P&L"))
+        events = _parse_events(_post_chat(client, "thanks, what are DP charges?"))
+
+    assert events[-1][0] == "done"
+    # The second call's last user message: tool_result first, then the text.
+    last_user = fake.calls[1]["messages"][-1]
+    assert last_user["role"] == "user"
+    types = [block["type"] for block in last_user["content"]]
+    assert types == ["tool_result", "text"]

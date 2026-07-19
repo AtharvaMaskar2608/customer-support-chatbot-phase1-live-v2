@@ -263,9 +263,13 @@ export function ChatShell({
     )
   }
 
-  /** Render an artifact event through the EXISTING result renderers. */
+  /** Render an artifact event through the EXISTING result renderers.
+   *  The model is silent after artifact rounds (CHO-215) — any connective
+   *  copy is rendered HERE, deterministically: zero tokens, and this code
+   *  actually knows the layout. */
   function renderAgentArtifact(artifact: AgentArtifact) {
     if (artifact.kind === 'file') {
+      bot('Your report is ready:')
       // Same card + /api/report/file/{token} mechanics as the report flows.
       const descriptor = artifact.flowKey !== undefined ? getFlow(artifact.flowKey) : undefined
       append({
@@ -293,6 +297,13 @@ export function ChatShell({
       if (parsed === null) return
       const descriptor = getFlow(parsed.flowKey)
       if (!descriptor || !isLive(descriptor)) return
+      // Deterministic handoff line: the sticker intro for an unseeded form,
+      // a "finish it" line when values are pre-filled.
+      bot(
+        Object.keys(parsed.seed).length === 0
+          ? descriptor.intro
+          : "Here you go — fill in the rest and it's on its way.",
+      )
       append({
         id: nextId(),
         kind: 'flow',

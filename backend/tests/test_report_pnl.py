@@ -290,6 +290,15 @@ def test_logs_carry_no_pii(client, caplog):
 # --- flow-event memory (CHO-214) ---------------------------------------------
 
 
+@pytest.fixture()
+def memory_client(monkeypatch):
+    """Memory-only store: real DATABASE_URL would rehydrate rows persisted by
+    earlier suite runs into the same test session id (non-hermetic)."""
+    monkeypatch.setattr("app.config.database_url", lambda: None)
+    with TestClient(create_app()) as test_client:
+        yield test_client
+
+
 def _wait_for_turns(store, session_id, *, tries=100):
     import asyncio
     import time
@@ -303,9 +312,10 @@ def _wait_for_turns(store, session_id, *, tries=100):
 
 
 @respx.mock
-def test_download_success_records_flow_event(client):
+def test_download_success_records_flow_event(memory_client):
     """A widget-completed P&L lands in agent memory: the route appends a
     flow_event turn (fire-and-forget) with the framed memo and label slots."""
+    client = memory_client
     _mock_pnl(_pnl_success(ARTIFACT_URL))
     _mock_artifact()
     resp = client.post("/api/report/pnl", headers=HEADERS, json=DOWNLOAD_BODY)
@@ -334,10 +344,11 @@ def test_download_success_records_flow_event(client):
 
 
 @respx.mock
-def test_upstream_failure_records_no_flow_event(client):
+def test_upstream_failure_records_no_flow_event(memory_client):
     """Only success becomes memory."""
     import time
 
+    client = memory_client
     _mock_pnl(httpx.Response(
         200, json={"Status": "Fail", "Response": "", "Reason": "No Data Found"}
     ))
