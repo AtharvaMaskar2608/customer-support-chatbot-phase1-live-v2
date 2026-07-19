@@ -17,4 +17,4 @@
 
 ## 4. Verification
 
-- [ ] 4.1 Backend suite green; live: rate a KB answer 👍 then switch 👎 → one row in Postgres with rating down and matching anchor_seq; rate a sticker-flow report → row anchored to its flow-event turn; chips absent on clarify/progress messages — live verify pending (orchestrator; backend suite green at 320 passed, and the 1.1 dev-DB schema apply is also the orchestrator's)
+- [x] 4.1 Backend suite green (320 passed / 2 skipped); live-verified: KB answer rated up then switched down → ONE Postgres row (rating=down) anchored to the assistant_text turn via done.lastSeq; sticker-flow P&L rated without anchorSeq → row anchored to its flow_event turn; missing credentials → 400; chips absent on non-answer messages by construction (kind-gated rendering)
