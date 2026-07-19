@@ -20,4 +20,4 @@
 ## 4. Docs + ship
 
 - [x] 4.1 `docs/api_doc/api_documentation.md` §9: KB search tool contract (+ note: KB content, no PII, no upstream FinX call)
-- [ ] 4.2 git-sync ship (`CHO-212:` commit, PR with `Fixes CHO-212`) + linear-connector lifecycle
+- [x] 4.2 git-sync ship (`CHO-212:` commit, PR with `Fixes CHO-212`) + linear-connector lifecycle
