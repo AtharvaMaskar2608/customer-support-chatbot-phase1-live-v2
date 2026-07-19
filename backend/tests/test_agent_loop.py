@@ -185,7 +185,7 @@ def test_end_turn_streams_text_and_terminates(app):
         assert kwargs["max_tokens"] == 4096
         assert "thinking" not in kwargs  # AGENT_THINKING=off omits it
         assert kwargs["system"][0]["cache_control"] == {"type": "ephemeral"}
-        assert len(kwargs["tools"]) == 10  # 9 capability tools + open_report_form
+        assert len(kwargs["tools"]) == 11  # 9 capability tools + form + ticket
 
         # primed first turn: bulk instructions + today's date at the END
         messages = kwargs["messages"]
@@ -346,7 +346,7 @@ def test_clarify_cap_counts_statement_tailed_questions(app):
 
         reminders = _reminder_texts(fake.calls[0])
         assert len(reminders) == 1
-        assert "human" in reminders[0]
+        assert "raise_support_ticket" in reminders[0]  # CHO-218 wording
 
 
 def test_clarify_cap_trips_and_injects_escalation(app):
@@ -365,7 +365,7 @@ def test_clarify_cap_trips_and_injects_escalation(app):
 
         reminders = _reminder_texts(fake.calls[0])
         assert len(reminders) == 1
-        assert "human" in reminders[0]
+        assert "raise_support_ticket" in reminders[0]  # CHO-218 wording
         assert "clarifying question" in reminders[0]
         # reminder is appended at the END of messages, never stored
         assert fake.calls[0]["messages"][-1]["content"][0]["text"] == reminders[0]
@@ -810,6 +810,94 @@ def test_short_circuited_turn_continues_cleanly(app):
     assert last_user["role"] == "user"
     types = [block["type"] for block in last_user["content"]]
     assert types == ["tool_result", "text"]
+
+
+# --- freshdesk escalation rounds (CHO-218) ------------------------------------
+
+# Fake Freshdesk endpoint + key — respx intercepts; NOT a real credential.
+FD_ROOT = "https://fd-test.invalid/api/v2"
+
+
+def _fd_env(monkeypatch):
+    monkeypatch.setenv("FRESHDESK_API_ROOT", FD_ROOT)
+    monkeypatch.setenv("FRESHDESK_API_KEY", "fd-test-key")
+
+
+@respx.mock
+def test_raise_ticket_round_emits_artifact_and_memo(app, monkeypatch):
+    """Successful escalation: ticket artifact, artifact-only short-circuit
+    (single model call), flow-event memo after the tool_result, and the
+    successful raise is a resolution event (task window resets)."""
+    _fd_env(monkeypatch)
+    route = respx.post(f"{FD_ROOT}/tickets").mock(
+        return_value=httpx.Response(201, json={"id": 7551234})
+    )
+    fake = FakeAnthropic([
+        _tool_msg(_tool_use("raise_support_ticket", {"reason": "need a human"})),
+    ])
+    with TestClient(app) as client:
+        app.state.anthropic_client = fake
+        events = _parse_events(_post_chat(client, "connect me to a person"))
+
+        assert len(fake.calls) == 1  # the card is the answer — no narration
+        assert [e for e, _ in events] == ["tool", "tool", "artifact", "done"]
+        assert dict(events)["artifact"] == {
+            "kind": "ticket", "ticketId": 7551234, "status": "Open",
+        }
+
+        # the transcript carried the conversation (this message included)
+        sent = json.loads(route.calls.last.request.content)
+        assert "connect me to a person" in sent["description"]
+
+        # memo lands AFTER the tool_result; resolution resets the task window
+        thread = _get_thread(app)
+        assert [t.kind for t in thread.turns] == [
+            "user_text", "assistant_tool_use", "tool_result", "flow_event",
+        ]
+        memo = thread.turns[-1]
+        assert memo.content[0]["text"].endswith(
+            "Support ticket #7551234 raised — need a human."
+        )
+        assert memo.meta == {
+            "flow": "ticket", "reason": "need a human", "ticketId": 7551234,
+        }
+        assert dict(events)["done"] == {
+            "thread": {"taskTurns": 0, "sessionTurns": 1, "lastSeq": 4},
+        }
+
+
+@respx.mock
+def test_raise_ticket_failure_bounces_and_model_narrates(app, monkeypatch):
+    """Freshdesk down: is_error tool_result, the model narrates alternatives
+    (continuation call happens), no artifact, no memo, never a stub id."""
+    _fd_env(monkeypatch)
+    respx.post(f"{FD_ROOT}/tickets").mock(return_value=httpx.Response(500))
+    fake = FakeAnthropic([
+        _tool_msg(_tool_use("raise_support_ticket", {"reason": "app crash"})),
+        _text_msg("I couldn't reach support just now — please try the Help "
+                  "section in the FinX app."),
+    ])
+    with TestClient(app) as client:
+        app.state.anthropic_client = fake
+        events = _parse_events(_post_chat(client, "raise a ticket"))
+
+        assert len(fake.calls) == 2  # errored round continues to the model
+        finished = [
+            d for e, d in events if e == "tool" and d["status"] == "finished"
+        ]
+        assert finished == [{
+            "name": "raise_support_ticket", "status": "finished",
+            "is_error": True,
+        }]
+        assert not [e for e, _ in events if e == "artifact"]
+        assert events[-1][0] == "done"
+
+        # the bounced tool_result is actionable; no flow_event memo appended
+        bounce = fake.calls[1]["messages"][-1]["content"][0]
+        assert bounce["is_error"] is True
+        assert "support system" in bounce["content"]
+        thread = _get_thread(app)
+        assert "flow_event" not in [t.kind for t in thread.turns]
 
 
 # --- conversation reset (CHO-216) ---------------------------------------------

@@ -46,7 +46,8 @@ class ToolCtx:
 
     Resource requirements per core: `pg_pool` for `run_kb_search` (None is the
     degraded KB_UNAVAILABLE state); `report_files` for the download paths of
-    the report cores; `contract_note_refs` for both contract-note cores.
+    the report cores; `contract_note_refs` for both contract-note cores;
+    `thread` for cores that need the conversation itself.
     """
 
     session_id: str
@@ -56,6 +57,11 @@ class ToolCtx:
     pg_pool: Any | None = None
     report_files: FileTokenStore | None = None
     contract_note_refs: "ContractNoteRefStore | None" = None
+    # The session's conversation thread (`app.agent.store.Thread`), populated
+    # for tools needing conversation context (raise_support_ticket renders the
+    # transcript from it). The agent loop and /api/ticket set it; plain flow
+    # routes leave it None.
+    thread: Any | None = None
 
 
 # --- tool-facing error codes -------------------------------------------------

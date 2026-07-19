@@ -99,7 +99,7 @@ async def _dispatch(name, params, **ctx_extra):
 
 def test_no_credential_fields_in_any_schema():
     schemas = agent_tools.tool_schemas()
-    assert len(schemas) == 10  # 8 capabilities (contract notes = 2 tools) + open_report_form
+    assert len(schemas) == 11  # 8 capabilities (notes = 2 tools) + form + ticket
     for schema in schemas:
         for name in _walk_property_names(schema["input_schema"]):
             assert _normalize(name) not in FORBIDDEN_PARAM_NAMES, (
@@ -133,6 +133,7 @@ def test_required_fields_match_the_request_models():
     assert required["get_money_transactions"] == set()
     assert required["get_brokerage_rates"] == set()
     assert required["search_knowledge_base"] == {"query"}
+    assert required["raise_support_ticket"] == {"reason"}
 
 
 def test_zero_slot_tools_expose_no_parameters():

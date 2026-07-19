@@ -10,6 +10,8 @@ defense from D3).
 
 The spec's "8 capabilities" map to 9 tool entries: contract notes is a
 two-step chain (list → download), mirrored as two tools over its two cores.
+CHO-214 added open_report_form (form handover) and CHO-218 added
+raise_support_ticket (Freshdesk escalation) — 11 entries total.
 
 Dispatch contract (task 2.2):
   - unknown tool          -> is_error, "unknown tool ..."
@@ -28,6 +30,7 @@ from typing import Any, Awaitable, Callable
 
 from app.agent.ctx import ToolCtx, ToolError
 from app.agent.forms import run_open_report_form
+from app.agent.tickets import run_raise_ticket
 from app.data.brokerage import run_brokerage
 from app.data.holdings import run_holdings
 from app.data.money import run_money
@@ -332,6 +335,31 @@ _TOOL_LIST = [
             "additionalProperties": False,
         },
         handler=run_kb_search,
+    ),
+    Tool(
+        name="raise_support_ticket",
+        description=(
+            "Raise a real support ticket with Choice's support team, with "
+            "this conversation attached. Call this when the user asks for a "
+            "human, asks to raise a ticket or complaint, or accepts your "
+            "offer to escalate — NEVER preemptively. If an App event earlier "
+            "in this conversation already records a ticket for this issue, "
+            "reference that ticket instead of calling this again."
+        ),
+        schema={
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string",
+                    "description": (
+                        "Short summary of the user's issue in their own words."
+                    ),
+                },
+            },
+            "required": ["reason"],
+            "additionalProperties": False,
+        },
+        handler=run_raise_ticket,
     ),
 ]
 

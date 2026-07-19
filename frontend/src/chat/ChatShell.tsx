@@ -21,7 +21,6 @@ import {
   dataErrorLine,
   errorLine,
   helpIntro,
-  makeTicketId,
   nextId,
   toolCaption,
   type Message,
@@ -355,6 +354,12 @@ export function ChatShell({
       })
       return
     }
+    if (artifact.kind === 'ticket') {
+      // A raised support ticket (CHO-218): the same confirmation card the
+      // help-card path renders, with the REAL Freshdesk id.
+      append({ id: nextId(), kind: 'ticket', ticketId: String(artifact.ticketId) })
+      return
+    }
     if (artifact.kind === 'flow') {
       // Form handover (CHO-214): boot the guided FlowCard seeded with the
       // re-validated values; the engine asks the first unfilled gap. The
@@ -622,15 +627,42 @@ export function ChatShell({
     user('Resend it')
     botThen(() => bot('Resent — check again in a minute.'))
   }
+  /** Help-card escalation (CHO-218): a REAL Freshdesk ticket via
+   *  POST /api/ticket. Busy pill while in flight; on failure a graceful
+   *  line — the help card stays on screen, so the action remains available. */
   async function handleRaiseTicket() {
     user('Raise a ticket')
     const narrId = nextId()
-    append({ id: narrId, kind: 'narrate', caption: 'Creating your ticket…' })
-    await delay(720)
-    updateCaption(narrId, 'Assigning to support…')
-    await delay(720)
-    remove(narrId)
-    append({ id: nextId(), kind: 'ticket', ticketId: makeTicketId() })
+    append({ id: narrId, kind: 'narrate', caption: 'Raising your ticket…' })
+    const fail = () => {
+      remove(narrId)
+      bot("Couldn't raise the ticket just now — mind trying again in a moment?")
+    }
+    if (!hasCredentials(session)) {
+      fail()
+      return
+    }
+    try {
+      const res = await fetch('/api/ticket', {
+        method: 'POST',
+        headers: { ...authHeaders(session), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'General Query' }),
+      })
+      if (!res.ok) {
+        fail()
+        return
+      }
+      const data = (await res.json()) as { ticketId?: unknown }
+      const ticketId = data.ticketId
+      if (typeof ticketId !== 'string' && typeof ticketId !== 'number') {
+        fail()
+        return
+      }
+      remove(narrId)
+      append({ id: nextId(), kind: 'ticket', ticketId: String(ticketId) })
+    } catch {
+      fail()
+    }
   }
 
   /* ── render ─────────────────────────────────────────────────────────── */

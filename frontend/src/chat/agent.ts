@@ -16,6 +16,8 @@
  *                         "flowKey"?: "pnl"|"ledger"|"tax"|"contract-notes"}
  *                        {"kind": "data", "tool": "get_holdings"|"get_money"|
  *                         "get_brokerage", ...ok-payload fields spread here}
+ *                        {"kind": "ticket", "ticketId": <id>, "status": "Open"}
+ *                         — a raised support ticket (CHO-218)
  *       event: done      {"thread": {"taskTurns": n, "sessionTurns": n,
  *                         "lastSeq": n}}                     — terminal; lastSeq
  *                        is the exchange's last stored turn seq (CHO-217
@@ -79,7 +81,19 @@ export interface AgentFlowArtifact {
   seed: Record<string, unknown>
 }
 
-export type AgentArtifact = AgentFileArtifact | AgentDataArtifact | AgentFlowArtifact
+/** A raised support ticket (CHO-218) — rendered through the existing
+ *  ticket-confirmation card with the REAL Freshdesk id. */
+export interface AgentTicketArtifact {
+  kind: 'ticket'
+  ticketId: string | number
+  status?: string
+}
+
+export type AgentArtifact =
+  | AgentFileArtifact
+  | AgentDataArtifact
+  | AgentFlowArtifact
+  | AgentTicketArtifact
 
 export interface AgentDoneEvent {
   /** `lastSeq` — the exchange's last stored turn seq, the CHO-217 feedback
@@ -120,6 +134,16 @@ function parseArtifact(x: unknown): AgentArtifact | null {
   if (a.kind === 'flow' && typeof a.flowKey === 'string') {
     const seed = asRecord(a.seed) ?? {}
     return { kind: 'flow', flowKey: a.flowKey, seed }
+  }
+  if (
+    a.kind === 'ticket' &&
+    (typeof a.ticketId === 'string' || typeof a.ticketId === 'number')
+  ) {
+    return {
+      kind: 'ticket',
+      ticketId: a.ticketId,
+      status: typeof a.status === 'string' ? a.status : undefined,
+    }
   }
   return null
 }
