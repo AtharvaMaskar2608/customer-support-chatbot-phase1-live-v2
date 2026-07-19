@@ -15,6 +15,7 @@ Public API consumed by the agent loop (wave B):
     store.append_turn(thread, role=..., kind=..., content=[...], meta={...})
     thread.messages()                             # wire-faithful messages array
     store.set_status(thread, "escalated")
+    store.record_feedback(thread, anchor_seq=3, rating="up", source="agent")
     store.dropped_writes                          # degraded-persistence metric
     await store.close()                           # drain, before pool close
 
@@ -45,6 +46,7 @@ KINDS = (
     "flow_event",
 )
 THREAD_STATUSES = ("active", "resolved", "escalated", "expired")
+RATINGS = ("up", "down")
 
 QUEUE_MAX = 1000  # bounded: a wedged tunnel degrades persistence, not chat
 _BATCH_MAX = 50  # jobs drained per writer wake-up over one connection
@@ -71,6 +73,14 @@ _TURN_SQL = """
 INSERT INTO turns (thread_id, seq, role, kind, content, meta, created_at)
 VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7)
 ON CONFLICT (thread_id, seq) DO NOTHING
+"""
+
+# One row per rated exchange; the last tap wins (CHO-217 · design D3).
+_FEEDBACK_SQL = """
+INSERT INTO feedback (thread_id, anchor_seq, rating, source)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (thread_id, anchor_seq) DO UPDATE
+    SET rating = EXCLUDED.rating, updated_at = now()
 """
 
 _SELECT_THREAD_SQL = """
@@ -313,6 +323,22 @@ class ThreadStore:
         self._threads[session_id] = fresh
         return fresh
 
+    def record_feedback(
+        self, thread: Thread, *, anchor_seq: int, rating: str, source: str
+    ) -> None:
+        """Synchronous, like append_turn: build the row and enqueue it —
+        rating never adds latency to chat, and degrades exactly like turn
+        persistence when the DB is down (CHO-217)."""
+        if rating not in RATINGS:
+            raise ValueError(f"invalid rating: {rating!r}")
+        row = {
+            "thread_id": thread.id,
+            "anchor_seq": anchor_seq,
+            "rating": rating,
+            "source": source,
+        }
+        self._enqueue(("feedback", row))
+
     def set_status(self, thread: Thread, status: str) -> None:
         if status not in THREAD_STATUSES:
             raise ValueError(f"invalid thread status: {status!r}")
@@ -436,6 +462,15 @@ class ThreadStore:
                 turn_row["content"],
                 turn_row["meta"],
                 turn_row["created_at"],
+            )
+        elif kind == "feedback":
+            row = job[1]
+            await conn.execute(
+                _FEEDBACK_SQL,
+                row["thread_id"],
+                row["anchor_seq"],
+                row["rating"],
+                row["source"],
             )
         else:  # pragma: no cover — enqueue only produces the kinds above
             raise ValueError(f"unknown store job kind: {kind!r}")

@@ -14,7 +14,10 @@ SSE contract (design D9, pinned with the frontend):
   artifact  file: {"kind":"file","file":{...},"fileToken","flowKey"}
             data: {"kind":"data","tool":<name>, ...envelope fields (its own
                    "kind":"ok" dropped — the artifact kind replaces it)}
-  done      {"thread": {"taskTurns": n, "sessionTurns": n}}   — terminal
+  done      {"thread": {"taskTurns": n, "sessionTurns": n,
+             "lastSeq": n}}                                    — terminal
+            (lastSeq = the thread's last turn seq — the CHO-217 feedback
+            anchor for the exchange's answer messages)
   error     {"error": "AGENT_UNAVAILABLE"|"AUTH_EXPIRED"}      — terminal
 Exactly one terminal event is emitted per stream. AUTH_EXPIRED from a tool is
 still fed to the model as an is_error tool_result (it narrates), and then
@@ -336,6 +339,7 @@ async def _chat_events(
                         "thread": {
                             "taskTurns": counters.task_user_turns,
                             "sessionTurns": counters.session_user_turns,
+                            "lastSeq": thread.turns[-1].seq if thread.turns else 0,
                         }
                     },
                 )
@@ -355,6 +359,7 @@ async def _chat_events(
                 "thread": {
                     "taskTurns": counters.task_user_turns,
                     "sessionTurns": counters.session_user_turns,
+                    "lastSeq": thread.turns[-1].seq if thread.turns else 0,
                 }
             },
         )

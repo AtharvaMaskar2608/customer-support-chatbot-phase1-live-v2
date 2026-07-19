@@ -665,3 +665,80 @@ def test_rehydration_selects_latest_thread():
 
     assert "ORDER BY created_at DESC" in _SELECT_THREAD_SQL
     assert "LIMIT 1" in _SELECT_THREAD_SQL
+
+
+# --- answer feedback (CHO-217) -------------------------------------------------
+
+
+def test_record_feedback_validates_rating():
+    async def scenario():
+        store = ThreadStore(pool=FakePool())
+        thread = await store.get_thread("fb-v")
+        before = store._queue.qsize()
+        with pytest.raises(ValueError):
+            store.record_feedback(
+                thread, anchor_seq=1, rating="sideways", source="agent"
+            )
+        assert store._queue.qsize() == before  # nothing enqueued
+
+    asyncio.run(scenario())
+
+
+def test_record_feedback_enqueues_upsert_last_tap_wins():
+    """Two ratings for the same exchange ride the queue in order; the SQL is
+    the (thread_id, anchor_seq) upsert, so the second (down) wins in the
+    table."""
+
+    async def scenario():
+        pool = FakePool()
+        store = ThreadStore(pool=pool)
+        await store.start()
+        thread = await store.get_thread("fb-u")
+        store.append_turn(
+            thread, role="user", kind="user_text", content=_text("hi")
+        )
+        store.record_feedback(thread, anchor_seq=1, rating="up", source="agent")
+        store.record_feedback(thread, anchor_seq=1, rating="down", source="agent")
+        await store.close()
+        return pool, thread
+
+    pool, thread = asyncio.run(scenario())
+    writes = [
+        (sql, args) for sql, args in pool.executed if "INSERT INTO feedback" in sql
+    ]
+    assert [args for _, args in writes] == [
+        (thread.id, 1, "up", "agent"),
+        (thread.id, 1, "down", "agent"),
+    ]
+    sql = writes[0][0]
+    assert "ON CONFLICT (thread_id, anchor_seq) DO UPDATE" in sql
+    assert "rating = EXCLUDED.rating" in sql
+    assert "updated_at = now()" in sql
+
+
+def test_record_feedback_memory_only_is_noop():
+    async def scenario():
+        store = ThreadStore(pool=None)
+        await store.start()
+        thread = await store.get_thread("fb-m")
+        store.record_feedback(thread, anchor_seq=2, rating="up", source="flow")
+        await store.close()
+        return store
+
+    store = asyncio.run(scenario())
+    assert store._queue.qsize() == 0
+    assert store.dropped_writes == 0  # configured-off, not degraded
+
+
+def test_record_feedback_queue_full_drops_with_counter(caplog):
+    async def scenario():
+        store = ThreadStore(pool=FakePool(), queue_max=1)
+        # writer intentionally NOT started → the queue can only fill
+        thread = await store.get_thread("fb-q")  # thread job fills the queue
+        store.record_feedback(thread, anchor_seq=1, rating="up", source="data")
+        return store
+
+    with caplog.at_level(logging.WARNING):
+        store = asyncio.run(scenario())
+    assert store.dropped_writes == 1  # dropped, chat/submit unaffected
+    assert "queue full" in caplog.text

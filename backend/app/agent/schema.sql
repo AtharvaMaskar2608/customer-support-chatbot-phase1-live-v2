@@ -117,3 +117,18 @@ CREATE TABLE IF NOT EXISTS turns (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (thread_id, seq)
 );
+
+-- Answer ratings (CHO-217 · design D3): one row per rated exchange, anchored
+-- to the exchange's last turn seq. Upserted (last tap wins); no message text,
+-- no personal data beyond the thread linkage. Export joins to `turns` on
+-- (thread_id, seq <= anchor_seq).
+CREATE TABLE IF NOT EXISTS feedback (
+    id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    thread_id  UUID NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    anchor_seq INTEGER NOT NULL,
+    rating     TEXT NOT NULL CHECK (rating IN ('up', 'down')),
+    source     TEXT NOT NULL,          -- 'agent' | 'flow' | 'data'
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (thread_id, anchor_seq)
+);

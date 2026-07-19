@@ -26,10 +26,11 @@ import {
   toolCaption,
   type Message,
 } from './messages'
-import { streamAgentChat, type AgentArtifact } from './agent'
+import { authHeaders, streamAgentChat, type AgentArtifact } from './agent'
 import { parseDataArtifact, parseFlowArtifact } from './agentArtifacts'
 import { downloadContractNote, fetchContractNotes, type ClientNote } from './notes'
 import { EmptyState } from './EmptyState'
+import { FeedbackChip, type FeedbackRating } from './FeedbackChip'
 import { Stickers } from './Stickers'
 import { FlowCard } from './FlowCard'
 import { NotesList, ChangeDatesButton } from './NotesList'
@@ -207,6 +208,11 @@ export function ChatShell({
     append({ id: indicatorId, kind: 'typing' })
     let streamId: string | null = null // the currently-growing agent message
     let rendered = false // any text/artifact on screen yet?
+    // This exchange's answer messages: artifact cards + the LAST text bubble
+    // (mid-stream bubbles never carry chips). Stamped with done.lastSeq so
+    // their feedback chips anchor to exactly this exchange (CHO-217).
+    const answerIds: string[] = []
+    let lastBubbleId: string | null = null
 
     const clearIndicator = () => {
       if (indicatorId !== null) {
@@ -229,6 +235,7 @@ export function ChatShell({
           rendered = true
           if (streamId === null) {
             streamId = nextId()
+            lastBubbleId = streamId
             append({ id: streamId, kind: 'agent', text: delta })
           } else {
             appendAgentDelta(streamId, delta)
@@ -244,10 +251,14 @@ export function ChatShell({
           clearIndicator()
           streamId = null
           rendered = true
-          renderAgentArtifact(artifact)
+          renderAgentArtifact(artifact, (id) => answerIds.push(id))
         },
-        onDone: () => {
+        onDone: (ev) => {
           clearIndicator()
+          stampAnchor(
+            ev.thread.lastSeq,
+            lastBubbleId === null ? answerIds : [...answerIds, lastBubbleId],
+          )
           // Defensive: an empty reply must never leave dead air.
           if (!rendered) routeByKeyword(text)
         },
@@ -274,17 +285,61 @@ export function ChatShell({
     )
   }
 
+  /* ── answer feedback (CHO-217) ──────────────────────────────────────── */
+
+  /** Can this message carry a feedback chip? (Narrowing helper for TS.) */
+  function isRatable(
+    m: Message,
+  ): m is Extract<Message, { kind: 'agent' | 'download' | 'email' | 'datacard' }> {
+    return m.kind === 'agent' || m.kind === 'download' || m.kind === 'email' || m.kind === 'datacard'
+  }
+
+  /** Stamp the exchange's `done.lastSeq` onto the answer messages it just
+   *  rendered — one exchange, one anchor: the chip on any of them rates the
+   *  same feedback row. */
+  function stampAnchor(anchorSeq: number, ids: string[]) {
+    if (anchorSeq <= 0 || ids.length === 0) return
+    const idSet = new Set(ids)
+    setMessages((prev) =>
+      prev.map((m) => (idSet.has(m.id) && isRatable(m) ? { ...m, anchorSeq } : m)),
+    )
+  }
+
+  /** Optimistic rating + fire-and-forget submit (design D2): the chip
+   *  reflects the tap immediately; a lost rating never surfaces an error. */
+  function handleRate(msgId: string, rating: FeedbackRating) {
+    const msg = messages.find((m) => m.id === msgId)
+    if (!msg || !isRatable(msg) || msg.feedback === rating) return
+    setMessages((prev) =>
+      prev.map((m) => (m.id === msgId && isRatable(m) ? { ...m, feedback: rating } : m)),
+    )
+    if (!hasCredentials(session)) return
+    // Agent-path messages carry the exchange anchor; sticker-path cards have
+    // none — the backend then anchors to the thread's latest turn.
+    const stickerSource = msg.kind === 'datacard' ? 'data' : 'flow'
+    const source =
+      msg.kind === 'agent' || msg.anchorSeq !== undefined ? 'agent' : stickerSource
+    void fetch('/api/feedback', {
+      method: 'POST',
+      headers: { ...authHeaders(session), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rating, anchorSeq: msg.anchorSeq, source }),
+    }).catch(() => {}) // silent failure by design
+  }
+
   /** Render an artifact event through the EXISTING result renderers.
    *  The model is silent after artifact rounds (CHO-215) — any connective
    *  copy is rendered HERE, deterministically: zero tokens, and this code
-   *  actually knows the layout. */
-  function renderAgentArtifact(artifact: AgentArtifact) {
+   *  actually knows the layout. `onAnswer` collects the ids of the answer
+   *  messages (file/data cards) so onDone can stamp the feedback anchor. */
+  function renderAgentArtifact(artifact: AgentArtifact, onAnswer: (id: string) => void) {
     if (artifact.kind === 'file') {
       bot('Your report is ready:')
       // Same card + /api/report/file/{token} mechanics as the report flows.
       const descriptor = artifact.flowKey !== undefined ? getFlow(artifact.flowKey) : undefined
+      const cardId = nextId()
+      onAnswer(cardId)
       append({
-        id: nextId(),
+        id: cardId,
         kind: 'download',
         flowKey: artifact.flowKey ?? '',
         values: {},
@@ -334,7 +389,9 @@ export function ChatShell({
       append({ id: nextId(), kind: 'dataEmpty', flowKey: parsed.flowKey })
       return
     }
-    append({ id: nextId(), kind: 'datacard', flowKey: parsed.flowKey, data: parsed.data })
+    const cardId = nextId()
+    onAnswer(cardId)
+    append({ id: cardId, kind: 'datacard', flowKey: parsed.flowKey, data: parsed.data })
     if (getDataFlow(parsed.flowKey)?.followup) {
       append({ id: nextId(), kind: 'dataFollowup', flowKey: parsed.flowKey })
     }
@@ -607,6 +664,7 @@ export function ChatShell({
               onRaiseTicket={handleRaiseTicket}
               onNoteTap={handleNoteTap}
               onChangeDates={handleChangeDates}
+              onRate={handleRate}
             />
           ))}
         </div>
@@ -638,6 +696,7 @@ function MessageView({
   onRaiseTicket,
   onNoteTap,
   onChangeDates,
+  onRate,
 }: Readonly<{
   message: Message
   session: SessionContext
@@ -652,6 +711,7 @@ function MessageView({
   onRaiseTicket: () => void
   onNoteTap: (flowMsgId: string, downloadEndpoint: string, note: ClientNote) => void
   onChangeDates: (flowMsgId: string) => void
+  onRate: (msgId: string, rating: FeedbackRating) => void
 }>) {
   const m = message
   switch (m.kind) {
@@ -670,10 +730,17 @@ function MessageView({
     case 'agent':
       // Streamed reply — same look as `bot`, pre-wrap so the model's line
       // breaks and paragraphs survive (raw markdown beyond ** is not sent).
+      // The chip appears only once done.lastSeq is stamped — exchange-final
+      // bubbles only, never mid-stream text (CHO-217).
       return (
-        <p className="text-[14.5px] leading-normal whitespace-pre-wrap text-zinc-800 dark:text-zinc-100">
-          <RichText text={m.text} />
-        </p>
+        <div className="flex flex-col gap-1.5">
+          <p className="text-[14.5px] leading-normal whitespace-pre-wrap text-zinc-800 dark:text-zinc-100">
+            <RichText text={m.text} />
+          </p>
+          {m.anchorSeq !== undefined && (
+            <FeedbackChip rating={m.feedback} onRate={(rating) => onRate(m.id, rating)} />
+          )}
+        </div>
       )
     case 'typing':
       return <Typing />
@@ -697,17 +764,25 @@ function MessageView({
     }
     case 'download':
       return (
-        <FileCard
-          file={m.file}
-          passwordNote={m.passwordNote}
-          emailable={m.emailable ?? true}
-          onDownload={() => onDownload(m.fileToken, m.file.name)}
-          onEmailIt={() => onEmailIt(m.flowKey, m.values)}
-          onHelp={() => onHelp(m.helpKind)}
-        />
+        <div className="flex flex-col gap-1.5">
+          <FileCard
+            file={m.file}
+            passwordNote={m.passwordNote}
+            emailable={m.emailable ?? true}
+            onDownload={() => onDownload(m.fileToken, m.file.name)}
+            onEmailIt={() => onEmailIt(m.flowKey, m.values)}
+            onHelp={() => onHelp(m.helpKind)}
+          />
+          <FeedbackChip rating={m.feedback} onRate={(rating) => onRate(m.id, rating)} />
+        </div>
       )
     case 'email':
-      return <EmailCard noun={m.noun} emailMasked={m.emailMasked} onHelp={() => onHelp('email')} />
+      return (
+        <div className="flex flex-col gap-1.5">
+          <EmailCard noun={m.noun} emailMasked={m.emailMasked} onHelp={() => onHelp('email')} />
+          <FeedbackChip rating={m.feedback} onRate={(rating) => onRate(m.id, rating)} />
+        </div>
+      )
     case 'notesList':
       return (
         <NotesList
@@ -726,7 +801,12 @@ function MessageView({
       const descriptor = getDataFlow(m.flowKey)
       if (!descriptor) return null
       const Card = descriptor.Card
-      return <Card data={m.data} session={session} />
+      return (
+        <div className="flex flex-col gap-1.5">
+          <Card data={m.data} session={session} />
+          <FeedbackChip rating={m.feedback} onRate={(rating) => onRate(m.id, rating)} />
+        </div>
+      )
     }
     case 'dataEmpty': {
       const descriptor = getDataFlow(m.flowKey)
