@@ -11,15 +11,19 @@ The widget SHALL present a single scrolling conversation. The greeting + quick-a
 - **THEN** the greeting + stickers animate away and the flow continues inline as messages
 
 ### Requirement: Pinned composer with keyword routing
-A composer SHALL remain pinned and usable at every point, including after a flow completes. Submitting text SHALL route by keyword to the matching flow (e.g. "ledger" → ledger flow) or, if unmatched, reply with the available actions. (Full natural-language understanding is a later change.)
+A composer SHALL remain pinned and usable at every point, including after a flow completes. Submitting text SHALL route by keyword to the matching flow — file flows (P&L, ledger, capital gains, contract notes) and data flows (holdings/portfolio, pay-in/pay-out/deposit/withdraw, brokerage/charges/slab) — or, if unmatched, reply with the available actions including the data flows. (Full natural-language understanding is a later change.)
 
 #### Scenario: Text routes to a flow
 - **WHEN** the user types a message matching a known report
 - **THEN** that flow starts inline
 
+#### Scenario: Data-flow keywords route
+- **WHEN** the user types "my portfolio", "did my deposit land" or "what's my brokerage"
+- **THEN** the holdings, money, or brokerage flow starts inline
+
 #### Scenario: Unmatched text
 - **WHEN** the user types something with no matching flow
-- **THEN** the bot replies with the available report actions
+- **THEN** the bot replies with the available report and data actions
 
 ### Requirement: Narrated generation
 While a report is being produced, the shell SHALL show a sequence of short progress captions specific to the flow (e.g. "Pulling your trades… → Tallying charges… → Sealing with your PAN…") rather than a generic spinner.
@@ -48,4 +52,11 @@ A result's help affordance ("Tell me") SHALL open an actionable card (context-ap
 #### Scenario: Raise a ticket
 - **WHEN** the user opens help on a delivered report and taps "Raise a ticket"
 - **THEN** a ticket-confirmation card appears with a ticket id and Open status
+
+### Requirement: Data-flow stickers
+The empty state SHALL include stickers for the three data flows — "My holdings", "Pay in / out", "Brokerage" — using the tinted icon system, alongside the four file-flow stickers.
+
+#### Scenario: Sticker starts a data flow
+- **WHEN** the user taps "My holdings" from the empty state
+- **THEN** the empty state collapses and the holdings flow runs inline
 
