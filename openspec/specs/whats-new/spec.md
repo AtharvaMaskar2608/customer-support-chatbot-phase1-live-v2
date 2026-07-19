@@ -1,7 +1,8 @@
 # whats-new
 
+## Purpose
+The widget's announcement surface: remotely-served "What's new" content with an unseen indicator and modal, plus the header affordance that hosts it — home-screen-only, ceding its slot to the Restart control during a conversation.
 ## Requirements
-
 ### Requirement: Announcement content is served remotely
 The backend SHALL expose `GET /api/whats-new` returning the current announcements as JSON: a content `version` string and an ordered list of items, each with `emoji`, `tint` (icon tile color key), `title`, and `description`. Content lives server-side only, so updating it requires no frontend/app release. The endpoint requires no credentials (content is non-personalized, non-PII).
 
@@ -40,3 +41,19 @@ The "What's new" pill SHALL show a small red notification dot when the current c
 #### Scenario: Content unavailable
 - **WHEN** the `/api/whats-new` request fails
 - **THEN** the pill renders without a red dot and opening it shows nothing broken (modal simply not available or empty state); the home screen is unaffected
+
+### Requirement: Home-screen-only pill with Restart takeover
+The "What's new" pill SHALL be shown only while the widget is on the home screen (greeting + stickers). From the moment the user engages (sticker tap or first composer submit) the same header slot SHALL show a "↻ Restart" control instead, for the life of the conversation. Tapping Restart SHALL return the widget to the home screen — clearing the conversation, aborting any in-flight agent stream, and requesting a fresh agent thread via `POST /api/chat/reset` — after which the What's New pill (including its unseen dot, if applicable) SHALL be shown again. The unseen-dot indicator SHALL never render on the Restart control.
+
+#### Scenario: Pill swaps on engagement
+- **WHEN** the user taps a sticker or sends their first message
+- **THEN** the header's What's New pill is replaced by the Restart control
+
+#### Scenario: Restart returns to a clean home screen
+- **WHEN** the user taps Restart mid-conversation (even while a reply is streaming)
+- **THEN** the stream is aborted, the conversation clears to the greeting + stickers, the header shows What's New again, and the next message starts a fresh agent conversation
+
+#### Scenario: Reset failure degrades safely
+- **WHEN** `POST /api/chat/reset` fails or times out
+- **THEN** the UI still resets to the home screen and the next message simply continues the previous agent thread
+
