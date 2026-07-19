@@ -201,6 +201,40 @@ def kb_embed_model() -> str:
     return os.environ.get("KB_EMBED_MODEL", "text-embedding-3-large")
 
 
+# --- Freshdesk escalation (CHO-218) ------------------------------------------
+#
+# Ticket creation credentials + routing. The API key is a secret (env, or
+# repo-root .env in dev — never logged, never in tool schemas); the API root
+# and group id are env-overridable so switching to a production group later
+# is a config change, not code. All read at call time.
+
+FRESHDESK_GROUP_ID_DEFAULT = 22000168676  # the chatbot-testing group
+
+
+def freshdesk_api_root() -> str | None:
+    """Freshdesk API v2 root: FRESHDESK_API_ROOT, else built from
+    FRESHDESK_DOMAIN as https://{domain}.freshdesk.com/api/v2. None when
+    neither is configured (ticketing then degrades to UPSTREAM_ERROR)."""
+    root = _secret("FRESHDESK_API_ROOT")
+    if root:
+        return root.rstrip("/")
+    domain = _secret("FRESHDESK_DOMAIN")
+    return f"https://{domain}.freshdesk.com/api/v2" if domain else None
+
+
+def freshdesk_api_key() -> str | None:
+    """Freshdesk API key (env, or repo-root .env in dev). Never logged."""
+    return _secret("FRESHDESK_API_KEY")
+
+
+def freshdesk_group_id() -> int:
+    """Freshdesk group id for bot tickets (FRESHDESK_GROUP_ID env override;
+    the default is the chatbot-testing group per design D1)."""
+    return int(
+        os.environ.get("FRESHDESK_GROUP_ID", str(FRESHDESK_GROUP_ID_DEFAULT))
+    )
+
+
 # --- Agent loop (CHO-213) ----------------------------------------------------
 #
 # Model + thinking are two env knobs (design D10). The thinking request-param

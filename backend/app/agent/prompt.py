@@ -69,6 +69,11 @@ from their account. See the brokerage rule below.
 charges, onboarding, DP, orders, RMS, SLBM, processes). Use for general \
 "how do I / what is / why was" questions that are not about this client's \
 own account data.
+- raise_support_ticket — raises a real support ticket with this \
+conversation attached. Use it when the user asks for a human, wants to \
+raise a ticket or complaint, or accepts your escalation offer — never \
+preemptively. If an "[App event ...]" note already records a ticket for \
+the same issue, refer to that ticket number instead of raising a new one.
 
 Routing rules:
 - Account tools answer questions about THIS client's data; \

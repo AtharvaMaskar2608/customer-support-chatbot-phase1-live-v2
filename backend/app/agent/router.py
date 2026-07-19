@@ -15,8 +15,9 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from app import config
-from app.agent.ctx import ToolCtx
+from app.agent.ctx import ToolCtx, ToolError, error_json_response
 from app.agent.loop import run_chat_stream
+from app.agent.tickets import run_raise_ticket, ticket_memo
 from app.reports.contract_notes import _ref_store
 
 logger = logging.getLogger("app.agent.router")
@@ -40,6 +41,14 @@ class FeedbackRequest(BaseModel):
     rating: Literal["up", "down"]
     anchorSeq: int | None = Field(default=None, ge=1)
     source: str = Field(default="agent", max_length=32)
+
+
+class TicketRequest(BaseModel):
+    # extra="ignore", same IDOR posture: only the reason is read — identity
+    # comes from the authenticated headers, never the body.
+    model_config = ConfigDict(extra="ignore")
+
+    reason: str = Field(default="General Query", min_length=1, max_length=200)
 
 
 def _missing_credentials() -> JSONResponse:
@@ -111,6 +120,57 @@ async def feedback(
         thread, anchor_seq=anchor_seq, rating=body.rating, source=body.source
     )
     return {"ok": True}
+
+
+@router.post("/api/ticket")
+async def ticket(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    x_session_id: str | None = Header(default=None),
+    x_user_id: str | None = Header(default=None),
+):
+    """Help-card escalation (CHO-218): raise a real Freshdesk ticket through
+    the same core the raise_support_ticket agent tool uses — identical
+    tickets from both entry points. Success also appends the flow-event memo
+    so the agent remembers the escalation; failure is the pinned error JSON
+    (the shell shows a graceful line) — never a fabricated ticket id."""
+    if not authorization or not x_session_id or not x_user_id:
+        return _missing_credentials()
+    try:
+        body = TicketRequest.model_validate(await request.json())
+    except Exception:
+        # Absent/malformed body or invalid reason → the default reason (the
+        # help-card path has no free text). Nothing user-supplied is echoed.
+        body = TicketRequest()
+
+    # Same credential posture as /api/chat: identity from the authenticated
+    # headers only. The ticket core needs just the shared http_client plus
+    # the conversation thread for the transcript.
+    ctx = ToolCtx(
+        session_id=x_session_id,
+        sso_jwt=authorization,
+        client_code=x_user_id,
+        http_client=request.app.state.http_client,
+    )
+    store = request.app.state.conversation_store
+    thread = await store.get_thread(x_session_id, client_code=x_user_id)
+    ctx.thread = thread
+
+    result = await run_raise_ticket({"reason": body.reason}, ctx)
+    if isinstance(result, ToolError):
+        return error_json_response(result)
+
+    # The same memo the agent path appends — the thread object is already in
+    # hand, so the synchronous append rides the store's writer queue directly.
+    ticket_id = result["ticketId"]
+    store.append_turn(
+        thread,
+        role="user",
+        kind="flow_event",
+        content=[{"type": "text", "text": ticket_memo(ticket_id, body.reason)}],
+        meta={"flow": "ticket", "ticketId": ticket_id, "reason": body.reason},
+    )
+    return {"ticketId": ticket_id, "status": result["status"]}
 
 
 @router.post("/api/chat")

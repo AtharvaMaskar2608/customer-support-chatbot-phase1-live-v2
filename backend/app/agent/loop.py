@@ -36,6 +36,7 @@ from typing import Any, AsyncIterator
 from app import config
 from app.agent import caps as agent_caps
 from app.agent import prompt as agent_prompt
+from app.agent import tickets as agent_tickets
 from app.agent import tools as agent_tools
 from app.agent.ctx import CODE_AUTH_EXPIRED, ToolCtx
 from app.agent.store import ThreadStore
@@ -61,18 +62,19 @@ _FILE_FLOW_KEYS = {
 _ESCALATION_REMINDER = (
     "<system-reminder>Conversation limit reached. Do not ask another "
     "clarifying question. Answer with the information you already have if "
-    "you can, and offer to connect the user with a human support agent for "
-    "anything unresolved.</system-reminder>"
+    "you can, and offer to raise a support ticket for them "
+    "(raise_support_ticket) for anything unresolved.</system-reminder>"
 )
 
 # Session backstop alone (CHO-214 · D6): a long-lived thread is normal use,
-# not evidence of struggle — offer a human only when the user seems stuck.
+# not evidence of struggle — offer escalation only when the user seems stuck.
 _SOFT_ESCALATION_REMINDER = (
     "<system-reminder>This session has been running a while. If the user "
     "seems stuck, frustrated, or keeps rephrasing the same unresolved "
-    "question, offer to connect them with a human support agent. If their "
-    "request is clear and answerable, just answer it normally — do not "
-    "mention conversation length or suggest escalation.</system-reminder>"
+    "question, offer to raise a support ticket for them "
+    "(raise_support_ticket). If their request is clear and answerable, just "
+    "answer it normally — do not mention conversation length or suggest "
+    "escalation.</system-reminder>"
 )
 
 _WRAPUP_REMINDER = (
@@ -153,6 +155,14 @@ def _artifact_payload(
             "flowKey": envelope.get("flow"),
             "seed": envelope.get("seed") or {},
         }
+    if name == "raise_support_ticket" and envelope.get("kind") == "ticket":
+        # Escalation (CHO-218): the shell renders the ticket-confirmation
+        # card; artifact-only rounds short-circuit, so the card is the answer.
+        return {
+            "kind": "ticket",
+            "ticketId": envelope.get("ticketId"),
+            "status": envelope.get("status"),
+        }
     if "fileToken" in envelope:
         return {
             "kind": "file",
@@ -192,6 +202,10 @@ async def _chat_events(
 ) -> AsyncIterator[str]:
     store.register_prompt(agent_prompt.snapshot_text(), agent_tools.tool_schemas())
     thread = await store.get_thread(ctx.session_id, client_code=ctx.client_code)
+    # Conversation context for tools that need it (CHO-218): the ticket core
+    # renders its transcript from ctx.thread — same live object, so turns
+    # appended below are visible when the tool runs.
+    ctx.thread = thread
     store.append_turn(
         thread,
         role="user",
@@ -321,6 +335,35 @@ async def _chat_events(
                         "duration_ms": outcome.duration_ms,
                     },
                 )
+                # CHO-218: a raised ticket enters agent memory as a flow-event
+                # memo (after its tool_result, matching the /api/ticket path)
+                # so follow-ups answer correctly and the model never
+                # re-raises for the same issue.
+                if (
+                    block["name"] == "raise_support_ticket"
+                    and not outcome.is_error
+                    and isinstance(outcome.envelope, dict)
+                ):
+                    ticket_id = outcome.envelope.get("ticketId")
+                    reason = str((block.get("input") or {}).get("reason") or "")
+                    store.append_turn(
+                        thread,
+                        role="user",
+                        kind="flow_event",
+                        content=[
+                            {
+                                "type": "text",
+                                "text": agent_tickets.ticket_memo(
+                                    ticket_id, reason
+                                ),
+                            }
+                        ],
+                        meta={
+                            "flow": "ticket",
+                            "ticketId": ticket_id,
+                            "reason": reason,
+                        },
+                    )
             # CHO-215: the artifact IS the answer. When every call succeeded
             # and every one produced an artifact (form/data/file card), end
             # the turn — no continuation model call, no narration. Any round

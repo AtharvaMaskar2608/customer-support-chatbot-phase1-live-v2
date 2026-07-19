@@ -73,7 +73,7 @@ export type Message =
   | { id: string; kind: 'notesAction'; flowMsgId: string; label: string }
   /** Actionable help card (options + raise-a-ticket). */
   | { id: string; kind: 'help'; helpKind: HelpKind }
-  /** Ticket-confirmation card. */
+  /** Ticket-confirmation card — always a REAL Freshdesk ticket id (CHO-218). */
   | { id: string; kind: 'ticket'; ticketId: string }
   /** A rendered data card (the answer in the chat). `data` is the payload the
    *  flow's fetch produced; its Card component narrows it. */
@@ -151,9 +151,4 @@ export function helpIntro(kind: HelpKind): string {
     case 'brokerage':
       return "These are your plan's rates — a specific trade's actual charges are on its contract note. Want a hand?"
   }
-}
-
-/** Stub ticket id, e.g. "CJ-48213" (no real ticketing backend in Wave 0). */
-export function makeTicketId(): string {
-  return `CJ-${Math.floor(10000 + Math.random() * 90000)}`
 }
