@@ -147,10 +147,9 @@ def validate_seed(
 
 
 _HANDOFF_NOTE = (
-    "The guided form is now open in the chat; the user will fill the "
-    "remaining fields and submit it there. Reply with ONE short line handing "
-    "off to the form — do not ask for any values and do not list what is "
-    "missing."
+    "The guided form is now open in the chat with its own caption; the user "
+    "will fill the remaining fields and submit it there. No assistant text "
+    "follows a form open — the turn ends here."
 )
 
 

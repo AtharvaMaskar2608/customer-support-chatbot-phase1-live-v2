@@ -142,7 +142,7 @@ def test_handler_returns_form_envelope():
     assert result["flow"] == "pnl"
     assert result["seed"] == {"segment": "Equity"}
     assert result["prefilled"] == ["segment"]
-    assert "do not ask" in result["note"]
+    assert "turn ends here" in result["note"]
 
 
 def test_handler_invalid_flow_is_the_only_error():

@@ -87,8 +87,8 @@ def test_cap_defaults(monkeypatch):
     ):
         monkeypatch.delenv(key, raising=False)
     assert config.clarify_cap() == 2
-    assert config.task_turn_cap() == 10
-    assert config.session_turn_cap() == 20
+    assert config.task_turn_cap() == 100
+    assert config.session_turn_cap() == 100
     assert config.agent_max_tool_rounds() == 5
 
 
