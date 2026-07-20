@@ -20,6 +20,8 @@ const MON = [
   'Nov',
   'Dec',
 ]
+/** Short month labels — the calendar's month grid and the range labels. */
+export const MONTHS_SHORT = MON
 export const MONTHS_LONG = [
   'January',
   'February',
