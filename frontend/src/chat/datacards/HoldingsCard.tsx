@@ -35,7 +35,7 @@ import {
 import { DOWN_TEXT, MINUS, UP_TEXT } from './tokens'
 
 /** Ranked-segment palette (top 5 by current value); the tail is one gray lump. */
-const SEG_COLORS = ['#7c3aed', '#2563eb', '#0d9488', '#d97706', '#db2777']
+const SEG_COLORS = ['#2777f3', '#7c3aed', '#0d9488', '#d97706', '#db2777']
 /** Row-dot gray for holdings beyond the top 5 (zinc-400, both themes). */
 const DOT_GRAY = '#a1a1aa'
 

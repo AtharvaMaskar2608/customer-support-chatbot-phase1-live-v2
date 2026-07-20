@@ -35,7 +35,7 @@ function Header({
         <BackIcon className="size-5" />
       </button>
 
-      <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-linear-to-br from-violet-500 to-accent-strong text-white shadow-md shadow-accent/25">
+      <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-linear-to-br from-[#4a90f5] to-accent-strong text-white shadow-md shadow-accent/25">
         <SparkleIcon className="size-5.5" />
       </div>
 
