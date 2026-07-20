@@ -21,7 +21,7 @@ services:
     restart: unless-stopped
 
   frontend:
-    image: 829433345651.dkr.ecr.ap-south-1.amazonaws.com/customer-support-chatbot:frontendv1.0.2
+    image: 829433345651.dkr.ecr.ap-south-1.amazonaws.com/customer-support-chatbot:frontendv1.0.3
     ports:
       - "8080:80"
     restart: unless-stopped
