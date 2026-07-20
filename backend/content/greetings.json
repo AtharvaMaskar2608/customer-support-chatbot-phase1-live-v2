@@ -1,0 +1,21 @@
+{
+  "_comment": "Entry-screen greeting templates, selected by market-clock window (see market_calendar.json). `templates` contain the {clientRef} placeholder so the client can render the customer's first name in its own accent styling — the backend never sends a fully rendered greeting. `fallbackTemplates` are used when no first name is available and contain NO placeholder, so the rendered line has no double space or dangling punctuation. DEFAULT must render byte-identically to the pre-existing static greeting.",
+  "version": "2026-07-20.1",
+  "placeholder": "{clientRef}",
+
+  "templates": {
+    "DEFAULT": "Hey {clientRef} — what do you need?",
+    "MORNING": "Good morning, {clientRef} ☀️ What can I get for you?",
+    "MARKET": "Hi {clientRef} — markets are live. Need a report or a quick answer?",
+    "POST_MARKET": "Hi {clientRef} 👋 Markets are closed — I'm not.",
+    "MUHURAT": "Happy Diwali, {clientRef} 🪔 Muhurat trading is live — need anything?"
+  },
+
+  "fallbackTemplates": {
+    "DEFAULT": "Hey there — what do you need?",
+    "MORNING": "Good morning ☀️ What can I get for you?",
+    "MARKET": "Markets are live. Need a report or a quick answer?",
+    "POST_MARKET": "Markets are closed — I'm not.",
+    "MUHURAT": "Happy Diwali 🪔 Muhurat trading is live — need anything?"
+  }
+}

@@ -14,6 +14,8 @@ import respx
 from fastapi.testclient import TestClient
 
 from app import config
+from app.clock import ist_today
+from app.data.money import _fy_window
 from app.main import create_app
 
 HEADERS = {
@@ -181,7 +183,9 @@ def test_upstream_body_matches_capture_with_fy_window(client):
     client.post("/api/data/money", headers=HEADERS)
 
     body = httpx.Response(200, content=in_route.calls.last.request.content).json()
-    today = datetime.date.today()
+    # IST, matching the app — `date.today()` here would make this test pass on an
+    # IST dev box and fail on a UTC CI runner inside the 00:00-05:30 window.
+    today = ist_today()
     fy_start = datetime.date(
         today.year if today.month >= 4 else today.year - 1, 4, 1
     )
@@ -412,3 +416,26 @@ def test_full_success_includes_partial_false(client):
     payload = client.post("/api/data/money", headers=HEADERS, json={}).json()
     assert payload["kind"] == "ok"
     assert payload["partial"] is False
+
+
+def test_fy_window_uses_the_ist_clock_across_the_new_financial_year(monkeypatch):
+    """1 April, 01:00 IST — the UTC clock still reads 31 March, which would
+    anchor the pay-in/pay-out window to the *previous* financial year and
+    request a full wrong year of transactions. Regression for CHO-224."""
+    import app.clock
+
+    # 2027-03-31 19:30 UTC == 2027-04-01 01:00 IST
+    monkeypatch.setattr(
+        app.clock,
+        "_utc_now",
+        lambda: datetime.datetime(2027, 3, 31, 19, 30, tzinfo=datetime.timezone.utc),
+    )
+    monkeypatch.setenv("TZ", "UTC")
+
+    from_date, to_date = _fy_window(ist_today())
+    assert from_date == "2027-04-01", "window anchored to the previous FY"
+    assert to_date == "2027-04-08"
+
+    # And the bug being guarded against, spelled out: host-local would give this.
+    stale_from, _ = _fy_window(datetime.date(2027, 3, 31))
+    assert stale_from == "2026-04-01"

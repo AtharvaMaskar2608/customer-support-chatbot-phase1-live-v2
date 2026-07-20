@@ -41,6 +41,7 @@ from app.agent.ctx import (
     error_json_response,
     tool_error_from_kind,
 )
+from app.clock import ist_today
 from app.data.envelope import KIND_EMPTY, KIND_OK, missing_credentials
 from app.data.normalize import (
     STATUS_SUCCESS,
@@ -76,7 +77,9 @@ def _fy_window(today: datetime.date) -> tuple[str, str]:
 
 def _txn_report_body(client_code: str) -> dict:
     """The captured GetPayIn/PayOutTxnRpt request body (UserID from session)."""
-    from_date, to_date = _fy_window(datetime.date.today())
+    # IST, not host-local: on 1 April between 00:00 and 05:30 IST a UTC-based
+    # "today" still reads 31 March, anchoring the window to the previous FY.
+    from_date, to_date = _fy_window(ist_today())
     return {
         "UserID": client_code,
         "FromDate": from_date,

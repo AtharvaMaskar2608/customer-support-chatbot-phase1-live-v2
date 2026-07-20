@@ -21,6 +21,7 @@ import re
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from app.agent.ctx import ToolCtx, ToolError, parse_params
+from app.clock import ist_today
 
 FLOW_KEYS = ("pnl", "ledger", "tax", "contract-notes")
 
@@ -118,8 +119,12 @@ def validate_seed(
 ) -> tuple[dict[str, str], list[str]]:
     """(surviving seed, dropped field names) per design D3 — fields the flow
     does not declare are dropped, declared fields with invalid values are
-    dropped, and dates survive only as a valid pair."""
-    today = today or datetime.date.today()
+    dropped, and dates survive only as a valid pair.
+
+    "Today" is IST (`Asia/Kolkata`) — the same clock the prompt states its
+    date on, so the model and this validator can never disagree about which
+    day it is. `today` stays injectable so tests can pin a date."""
+    today = today or ist_today()
     flow = params.flow
     provided = {
         key: value

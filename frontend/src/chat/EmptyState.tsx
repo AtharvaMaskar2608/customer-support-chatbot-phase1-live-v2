@@ -1,11 +1,54 @@
 import type { AnyFlowDescriptor } from '../flow/dataflow'
+import { useEntryGreeting } from '../useGreeting'
 import { Stickers } from './Stickers'
+
+const PLACEHOLDER = '{clientRef}'
+
+/**
+ * The headline, rendered from the backend's template (CHO-226).
+ *
+ * The template is split on `{clientRef}` and the name goes inside the same
+ * accent span the static greeting has always used — that is the whole reason
+ * the backend ships a template instead of a rendered string (design D1). With
+ * no template (fetch failed, partial payload, key we don't recognise) this
+ * falls through to the static greeting, byte-identical to the pre-CHO-226
+ * headline — which is also what the DEFAULT template renders to.
+ */
+function Headline({
+  firstName,
+  template,
+}: Readonly<{ firstName: string | null; template: string | null }>) {
+  if (template === null) {
+    return (
+      <>
+        Hey <span className="text-accent dark:text-accent-soft">{firstName ?? 'there'}</span> —
+        what do you need?
+      </>
+    )
+  }
+
+  const marker = template.indexOf(PLACEHOLDER)
+  // No placeholder: a fallbackTemplates entry, already free of dangling
+  // punctuation and double spaces. Render it verbatim.
+  if (marker === -1) return <>{template}</>
+
+  return (
+    <>
+      {template.slice(0, marker)}
+      <span className="text-accent dark:text-accent-soft">{firstName ?? 'there'}</span>
+      {template.slice(marker + PLACEHOLDER.length)}
+    </>
+  )
+}
 
 /**
  * The conversation's empty state: greeting + quick-action stickers. On first
  * engagement it collapses away (max-height/opacity transition) and the
  * conversation owns the canvas — `onCollapsed` unmounts it once the animation
  * settles. Keeps the "no email verification" line from the existing home.
+ *
+ * The greeting is presentation only: it is never a chat message, never in
+ * history, never routed as intent.
  */
 export function EmptyState({
   firstName,
@@ -18,6 +61,10 @@ export function EmptyState({
   onCollapsed: () => void
   onPick: (flow: AnyFlowDescriptor) => void
 }>) {
+  // Recomputed on mount, so Restart (which remounts the shell) re-selects the
+  // window; static thereafter, so a boundary passing mid-view changes nothing.
+  const greeting = useEntryGreeting()
+
   return (
     <div
       onTransitionEnd={collapsing ? onCollapsed : undefined}
@@ -28,8 +75,7 @@ export function EmptyState({
     >
       <section className="pt-1">
         <h2 className="text-[26px] leading-8 font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-          Hey <span className="text-accent dark:text-accent-soft">{firstName ?? 'there'}</span> —
-          what do you need?
+          <Headline firstName={firstName} template={greeting?.template ?? null} />
         </h2>
         <p className="mt-3 text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
           Reports, charges, processes, ticket status.
