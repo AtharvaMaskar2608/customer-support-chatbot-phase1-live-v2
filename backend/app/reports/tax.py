@@ -180,7 +180,7 @@ async def run_tax(
             "name": filename,
             "sizeLabel": size_label(len(data)),
             "format": params.format,  # "PDF" | "Excel" — the chosen format
-            "passwordProtected": True,  # delivered file is PAN-password-protected
+            "passwordProtected": False,  # tester-verified: upstream files are not protected (CHO-220)
         },
         "fileToken": token,
     }

@@ -82,7 +82,7 @@ def test_download_pdf_returns_token_and_hides_upstream_url(client):
     payload = resp.json()
     assert payload["delivery"] == "download"
     assert payload["file"]["format"] == "PDF"
-    assert payload["file"]["passwordProtected"] is True
+    assert payload["file"]["passwordProtected"] is False  # CHO-220: not protected
     assert payload["file"]["name"] == "CapitalGains_2025-2026.pdf"
     assert payload["file"]["name"].endswith(".pdf")
     assert payload["file"]["sizeLabel"].endswith("KB")
@@ -126,7 +126,7 @@ def test_download_excel_uses_xlsx_name_and_fileformat_2(client):
     assert payload["file"]["format"] == "Excel"
     assert payload["file"]["name"] == "CapitalGains_2025-2026.xlsx"
     assert payload["file"]["name"].endswith(".xlsx")
-    assert payload["file"]["passwordProtected"] is True
+    assert payload["file"]["passwordProtected"] is False  # CHO-220: not protected
 
     sent = httpx.Response(200, content=route.calls.last.request.content).json()
     assert sent["FileFormat"] == 2  # Excel

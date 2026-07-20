@@ -114,8 +114,12 @@ function parseInOut(x: unknown): { in: number; out: number } | null {
 /** Validate + normalize an `ok` payload body. Shared by the flow fetch and
  *  the agent's data artifacts (CHO-213) — both render the same card. */
 export function parseMoneyPayload(body: Record<string, unknown>): MoneyResult {
-  const { txns, counts, landed, totalRecords, partial } = body
-  if (!Array.isArray(txns) || typeof partial !== 'boolean') {
+  const { txns, counts, landed, totalRecords } = body
+  // Defensive: a missing partial flag means "nothing failed" (CHO-220 — the
+  // backend once omitted it on full success and every healthy payload was
+  // rejected as an error; never let one optional flag take the card down).
+  const partial = typeof body.partial === 'boolean' ? body.partial : false
+  if (!Array.isArray(txns)) {
     return { kind: 'error', code: 'upstream_error' }
   }
   const parsed: MoneyTxn[] = []

@@ -70,7 +70,7 @@ def test_download_returns_token_and_hides_upstream_url(client):
     payload = resp.json()
     assert payload["delivery"] == "download"
     assert payload["file"]["format"] == "PDF"
-    assert payload["file"]["passwordProtected"] is True
+    assert payload["file"]["passwordProtected"] is False  # CHO-220: not protected
     assert payload["file"]["name"] == "PnL_Equity_2026-04-01_to_2026-07-21.pdf"
     assert payload["file"]["sizeLabel"].endswith("KB")
     assert payload["fileToken"]

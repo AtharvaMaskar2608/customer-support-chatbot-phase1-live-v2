@@ -47,12 +47,12 @@ const ledger: FlowDescriptor = {
     { label: 'Send to email', mode: 'email', icon: MailIcon, style: 'ghost' },
   ],
 
-  narration: ['Gathering entries…', 'Balancing debits & credits…', 'Sealing with your PAN…'],
+  narration: ['Gathering entries…', 'Balancing debits & credits…', 'Packaging your report…'],
 
   result: {
     summary: (v, asOf) => `Your **${chip(v, 'book')}** ledger for **${range(v)}** (as of ${asOf}).`,
     emailNoun: (v) => `your **${chip(v, 'book')}** ledger for **${range(v)}**`,
-    passwordNote: 'password: PAN',
+    passwordNote: null, // reports are not password-protected (CHO-220)
     helpKind: 'pdf',
   },
 

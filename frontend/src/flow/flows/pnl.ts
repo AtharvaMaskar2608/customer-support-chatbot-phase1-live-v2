@@ -55,13 +55,13 @@ const pnl: FlowDescriptor = {
     { label: 'Send to email', mode: 'email', icon: MailIcon, style: 'ghost' },
   ],
 
-  narration: ['Pulling your trades…', 'Tallying charges…', 'Sealing with your PAN…'],
+  narration: ['Pulling your trades…', 'Tallying charges…', 'Packaging your report…'],
 
   result: {
     summary: (v, asOf) =>
       `Your **${chip(v, 'segment')}** P&L for **${range(v)}** (as of ${asOf}, incl. charges).`,
     emailNoun: (v) => `your **${chip(v, 'segment')}** P&L for **${range(v)}**`,
-    passwordNote: 'password: PAN',
+    passwordNote: null, // reports are not password-protected (CHO-220)
     helpKind: 'pdf',
   },
 

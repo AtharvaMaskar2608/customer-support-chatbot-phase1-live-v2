@@ -139,7 +139,7 @@ export function toolCaption(name: string): string {
 export function helpIntro(kind: HelpKind): string {
   switch (kind) {
     case 'pdf':
-      return 'These report PDFs are locked with your PAN (all caps) as the password. Want a hand?'
+      return 'Your report downloads right here and opens directly — no password needed. Want a hand?'
     case 'cn':
       return "Contract notes aren't password-protected — they should open directly. Want a hand?"
     case 'email':
