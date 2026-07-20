@@ -245,6 +245,8 @@ async def run_money(params: dict | None, ctx: ToolCtx) -> dict | ToolError:
 
     if not txns:
         payload: dict = {"kind": KIND_EMPTY}
+        if partial:
+            payload["partial"] = True
     else:
         payload = {
             "kind": KIND_OK,
@@ -252,9 +254,11 @@ async def run_money(params: dict | None, ctx: ToolCtx) -> dict | ToolError:
             "counts": _status_counts(txns),
             "landed": _landed_totals(txns),
             "totalRecords": {"in": total_in, "out": total_out},
+            # ALWAYS present — the pinned frontend contract requires a boolean;
+            # omitting it on full success made the card reject every healthy
+            # payload (CHO-220: the real pay-in/pay-out tester bug).
+            "partial": partial,
         }
-    if partial:
-        payload["partial"] = True
     return payload
 
 

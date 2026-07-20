@@ -8,7 +8,7 @@ First production tester feedback (19 Jul evening, via Rohan) surfaced four real 
 
 - **Prompt — concise, non-refusing knowledge answers**: KB narration leads with the direct answer (≈1–3 short sentences; detail only on request). The prompt gains the KB's REAL topic catalog (18 topics incl. Account Closure) plus a hard rule: process/how-to questions are always answered from the KB — the bot never refuses a how-to as "can't do that"; for account actions it cannot perform, it explains the process and offers a ticket.
 - **PAN claims removed everywhere** (tester-verified false): backend `passwordProtected` flags → `False` (P&L, ledger, tax), file-card `password: PAN` notes and "Sealing with your PAN…" narration dropped, help copy rewritten, prompt/tool-description mentions removed. Contract notes were already claim-free.
-- **Pay-in/pay-out diagnosis**: harvest prod logs for the reported failure; fix here if it's ours, document if it's session-expiry during testing.
+- **Pay-in/pay-out FIXED**: the reported failure was real — the money envelope omitted `partial` on full success, and the frontend contract rejected every healthy payload (it had only ever worked when a direction failed, ironically). Backend now always emits the boolean; the frontend defaults a missing flag to false so one optional field can never take the card down again.
 
 ## Capabilities
 

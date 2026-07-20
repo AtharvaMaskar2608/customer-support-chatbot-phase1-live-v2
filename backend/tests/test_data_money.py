@@ -401,3 +401,14 @@ def test_logs_carry_no_pii(client, caplog):
     assert "50100218008829" not in logtext
     assert "test-session-token" not in logtext
     assert "test-sso-jwt" not in logtext
+
+
+@respx.mock
+def test_full_success_includes_partial_false(client):
+    """CHO-220 regression: `partial` must ALWAYS be present — omitting it on
+    full success made the frontend reject every healthy payload (the real
+    pay-in/pay-out tester bug)."""
+    _mock_both()
+    payload = client.post("/api/data/money", headers=HEADERS, json={}).json()
+    assert payload["kind"] == "ok"
+    assert payload["partial"] is False
