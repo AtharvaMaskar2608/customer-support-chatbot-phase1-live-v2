@@ -12,7 +12,7 @@
  * `<script type="module" src="/src/widget/widget.ts">`.
  *
  * Renders (inside a shadow root, so host CSS cannot leak in):
- * - a circular purple launcher bubble fixed bottom-right over host content
+ * - a circular blue launcher bubble fixed bottom-right over host content
  * - a corner panel (~380x640 desktop, full-screen under 480px) holding an
  *   iframe of the chat page with the init params as query string plus
  *   `platform=web`
@@ -59,9 +59,9 @@ const STYLE = `
   border: none;
   padding: 0;
   cursor: pointer;
-  background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%);
+  background: linear-gradient(135deg, #4a90f5 0%, #1d5fd0 100%);
   color: #fff;
-  box-shadow: 0 8px 24px rgba(109, 40, 217, 0.45), 0 2px 6px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 8px 24px rgba(29, 95, 208, 0.45), 0 2px 6px rgba(0, 0, 0, 0.15);
   transition: transform 0.15s ease, box-shadow 0.15s ease;
   z-index: 2147483001;
 }

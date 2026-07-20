@@ -10,11 +10,11 @@
 @theme {
   /* Choice Jini design tokens (from the approved mock) */
 
-  /* Accent — violet-600 family */
-  --color-accent: #7c3aed;
-  --color-accent-strong: #6d28d9;
-  --color-accent-soft: #a78bfa;
-  --color-accent-tint: #ede9fe;
+  /* Accent — FinX blue (primary #2777F3 from the FinX Figma; CHO-221) */
+  --color-accent: #2777f3;
+  --color-accent-strong: #1d5fd0;
+  --color-accent-soft: #7aa8f8;
+  --color-accent-tint: #e9f1fe;
 
   /* Greens — online status + highlight phrases */
   --color-online: #16a34a;
