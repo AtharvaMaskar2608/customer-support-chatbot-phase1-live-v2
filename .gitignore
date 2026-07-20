@@ -24,3 +24,6 @@ playwright/.cache/
 # Local editor/agent settings
 .claude/settings.local.json
 .vscode/
+
+# local embed demo — carries a live session token, never commit
+jini-embed-demo.html

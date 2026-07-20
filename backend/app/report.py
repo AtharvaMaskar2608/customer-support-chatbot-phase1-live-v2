@@ -164,7 +164,7 @@ async def run_pnl(
             "name": filename,
             "sizeLabel": size_label(len(data)),
             "format": "PDF",
-            "passwordProtected": True,  # delivered PDF is PAN-password-protected
+            "passwordProtected": False,  # tester-verified: upstream PDFs are not protected (CHO-220)
         },
         "fileToken": token,
     }

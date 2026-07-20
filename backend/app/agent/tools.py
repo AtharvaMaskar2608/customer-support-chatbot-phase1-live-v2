@@ -143,7 +143,7 @@ _TOOL_LIST = [
         name="get_pnl_report",
         description=(
             "Generate the client's Profit & Loss (P&L) statement for one "
-            "trading segment over a date range, as a password-protected PDF "
+            "trading segment over a date range, as a PDF "
             "(download or email). Call this when the user asks for their "
             "P&L, profit/loss statement, or realized trading performance. "
             "All four parameters are required — call this ONLY when every "
@@ -172,8 +172,8 @@ _TOOL_LIST = [
         name="get_ledger_report",
         description=(
             "Generate the client's ledger (account statement of debits and "
-            "credits) for the Normal or MTF book over a date range, as a "
-            "password-protected PDF (download or email). Call this when the "
+            "credits) for the Normal or MTF book over a date range, as a PDF "
+            "(download or email). Call this when the "
             "user asks for their ledger, account statement, or fund "
             "debit/credit history. All four parameters are required — call "
             "this ONLY when every one is explicitly known; otherwise call "
