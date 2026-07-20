@@ -1,5 +1,5 @@
 import { useEffect, type ComponentType, type SVGProps } from 'react'
-import { DocumentIcon, TicketIcon, XIcon } from './icons'
+import { DocumentIcon, SparkleIcon, TicketIcon, XIcon } from './icons'
 import type { WhatsNewItem } from './useWhatsNew'
 
 /**
@@ -14,6 +14,7 @@ const GLYPHS: Record<string, ComponentType<SVGProps<SVGSVGElement>>> = {
   '📄': DocumentIcon,
   '🎫': TicketIcon,
   '🎟️': TicketIcon,
+  '✨': SparkleIcon,
 }
 
 /** tint key from the payload -> tile background + glyph color. */
@@ -25,6 +26,10 @@ const TINTS: Record<string, { tile: string; glyph: string }> = {
   green: {
     tile: 'bg-green-100 dark:bg-green-500/20',
     glyph: 'text-green-600 dark:text-green-400',
+  },
+  blue: {
+    tile: 'bg-accent-tint dark:bg-accent/20',
+    glyph: 'text-accent dark:text-accent-soft',
   },
 }
 const NEUTRAL: { tile: string; glyph: string } = {
@@ -115,10 +120,6 @@ export function WhatsNewModal({
         >
           Got it
         </button>
-
-        <p className="mt-3 text-center text-[11px] text-zinc-400 dark:text-zinc-600">
-          Content updated remotely — no app release needed
-        </p>
       </div>
     </div>
   )

@@ -1,17 +1,23 @@
 {
-  "version": "2026-07-18.1",
+  "version": "2026-07-20.1",
   "items": [
     {
       "emoji": "📄",
       "tint": "indigo",
-      "title": "Capital Gain report in Excel",
-      "description": "Ask for FY 25-26 — delivered in-chat, tax-filing ready."
+      "title": "Your P&L and contract notes, right here",
+      "description": "Delivered in chat as a PDF — no email verification."
     },
     {
-      "emoji": "🎫",
+      "emoji": "✨",
+      "tint": "blue",
+      "title": "Ask, don't search",
+      "description": "Charges, processes, settlements"
+    },
+    {
+      "emoji": "📄",
       "tint": "green",
-      "title": "Live ticket status",
-      "description": "Type a ticket number to get its current stage, instantly."
+      "title": "Capital Gain report in Excel",
+      "description": "Ask for FY 25-26 — delivered in-chat, tax-filing ready."
     }
   ]
 }
