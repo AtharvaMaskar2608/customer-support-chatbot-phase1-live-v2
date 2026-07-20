@@ -72,7 +72,7 @@ const tax: FlowDescriptor = {
   result: {
     summary: (v) => `Your capital gains statement for **FY ${fy(v)}** (${format(v)}).`,
     emailNoun: (v) => `your capital gains statement for **FY ${fy(v)}**`,
-    passwordNote: 'password: PAN',
+    passwordNote: null, // reports are not password-protected (CHO-220)
     helpKind: 'pdf',
   },
 

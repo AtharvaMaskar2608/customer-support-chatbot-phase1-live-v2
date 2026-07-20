@@ -1,0 +1,7 @@
+# CHO-220 · Tester Feedback Fixes — Tasks
+
+- [x] 1.1 Prompt: KB topic catalog (18 real topics) + never-refuse-process-questions rule (account closure answered from KB, ticket offered for unperformable actions) + brevity rule for KB narration (lead with the answer, 1–3 sentences, detail on request); drop the PAN-password mention; update the two report-tool descriptions that say "password-protected"
+- [x] 1.2 Backend flags: `passwordProtected: False` in P&L/ledger/tax envelopes (comments updated); tests asserting True fixed
+- [x] 1.3 Frontend: `passwordNote: null` in pnl/ledger/tax descriptors; "Sealing with your PAN…" narration → "Packaging your report…"; help `pdf` copy rewritten without the PAN claim; agent file-artifact fallback note removed; build green
+- [x] 1.4 DIAGNOSED — not a product bug: 48h prod logs show every /api/data/money call returned 200 OK (holdings/brokerage/tax likewise); the only failures were two 401s on P&L/ledger = session expiry during evening testing (expected behavior with expired FinX credentials; the widget shows the session-expired line). Documented; no code change.
+- [x] 1.5 Backend 343 passed / 2 skipped (three flag assertions updated); frontend tsc + builds green; live sanity on the new prompt: "how do I delete my account?" → KB-sourced closure process (app path, 3-day e-sign link, zero-balance note), zero refusal; "what are AMC charges?" → 206-char two-sentence answer leading with the amount; file cards show no password note by construction (passwordNote null everywhere).

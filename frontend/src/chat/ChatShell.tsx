@@ -344,9 +344,7 @@ export function ChatShell({
         values: {},
         file: artifact.file,
         fileToken: artifact.fileToken,
-        passwordNote:
-          descriptor?.result.passwordNote ??
-          (artifact.file.passwordProtected ? 'password: PAN' : null),
+        passwordNote: descriptor?.result.passwordNote ?? null,
         helpKind: descriptor?.result.helpKind ?? 'pdf',
         // "Email it" replays a slot-filled flow; the agent card has no slot
         // values to replay — delivery changes go back through chat instead.
