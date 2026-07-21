@@ -100,6 +100,9 @@ ORDER BY seq
 
 
 def _now() -> datetime:
+    """Storage timestamps stay UTC deliberately (CHO-224): these are ordering
+    and audit values for the DB, not human-facing dates. The IST clock in
+    `app/clock.py` is only for what the user experiences as "today"."""
     return datetime.now(timezone.utc)
 
 

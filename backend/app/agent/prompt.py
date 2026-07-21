@@ -5,21 +5,45 @@ a SHORT identity + compliance block in `system`, and the bulk instructions,
 slot-filling rules, and few-shot examples in a primed first user turn that the
 assistant acknowledges with "Understood.".
 
-Prompt-caching discipline:
-  - SYSTEM_PROMPT is frozen — no interpolation, ever. The cache breakpoint
+Prompt-caching discipline (CHO-226 · design D8):
+  - SYSTEM_PROMPT is frozen — no interpolation, ever. A cache breakpoint
     (`cache_control: ephemeral`) sits on the system block, so the rendered
     tools + system prefix stays byte-stable across requests.
-  - Today's date is the ONLY dynamic value and is injected at a STABLE
-    position: the very end of the primed first turn. Everything before it is
-    byte-identical across requests (and across days).
+  - The primed user turn is TWO content blocks. Block 0 is the frozen
+    instructions + few-shot examples and carries the second breakpoint; block
+    1 is the live IST status line and is LAST. `cache_control` attaches to a
+    content block and a user message may hold several, so everything up to
+    the breakpoint is reusable and the volatile line after it costs nothing
+    to change per request.
+  - No volatile value may appear before a breakpoint. The status line
+    replaces the old trailing `Today's date is …` line, which sat inside the
+    cached block and churned it once a day.
+
+Measured with `count_tokens` on `claude-haiku-4-5` (CHO-226 · task 5.4),
+whose minimum cacheable prefix is 4096 tokens — double Sonnet 4.6's 2048:
+
+    tools (11 schemas)                2,716 tokens
+    system                              229 tokens
+    tools + system  (breakpoint 1)    2,946 tokens   ← BELOW 4096
+    + primed block 0 (breakpoint 2)   4,711 tokens   ← clears 4096
+
+So the pre-CHO-226 single breakpoint on `system` was caching **nothing** on
+Haiku: 2,946 < 4,096 fails the minimum silently (no error, just
+`cache_creation_input_tokens: 0`). Folding the frozen instructions in behind
+a second breakpoint is what switches caching on for the first time. The
+system breakpoint is kept anyway — it costs nothing, and on
+`claude-sonnet-4-6` (the other configured model, minimum 2048) it does cache.
 
 The primed turn is part of the PROMPT, not of the conversation: it is
 prepended to `thread.messages()` at call time and never stored as turns
 (store turns hold only the real conversation; `snapshot_text()` is what the
-prompt_snapshots row records).
+prompt_snapshots row records — with the status line's PLACEHOLDERS, so the
+prompt hash stays stable from one minute to the next).
 """
 
 import datetime
+
+from app import clock
 
 SYSTEM_PROMPT = """\
 You are Choice Jini, the customer-support assistant for FinX by Choice \
@@ -41,8 +65,8 @@ the same way.
 """
 
 # Frozen bulk instructions + few-shot examples for the primed first turn.
-# `{today}` / `{weekday}` are filled by primed_messages() — the placeholders
-# themselves are part of the frozen snapshot text.
+# Byte-stable across every request: NOTHING is interpolated here. The live
+# clock arrives in the next content block, after the cache breakpoint.
 PRIMED_INSTRUCTIONS = """\
 Instructions for this support conversation:
 
@@ -115,8 +139,10 @@ missing piece just to call the tool directly.
 actually stated (or ids returned by an earlier tool call, or values from an \
 App event note).
 - Resolve relative dates ("last month", "this FY", "yesterday") to concrete \
-YYYY-MM-DD values using today's date given at the end of this message, \
-before calling any tool.
+YYYY-MM-DD values using the current IST date and time given at the end of \
+this message, before calling any tool. That line also states whether the \
+market is open and when the session closes — use it for cutoff questions \
+("can I still withdraw today?") instead of guessing.
 - For non-report tools, if something required is missing (e.g. no note id \
 yet), ask for ALL missing things in ONE bundled question — never one at a \
 time.
@@ -173,9 +199,7 @@ A: I can't advise on buying or selling — that's a decision for you, \
 ideally with a registered investment advisor. I can show you factual \
 information though, like your current holdings or P&L. Want me to pull \
 either up?
-</example>
-
-Today's date is {today} ({weekday})."""
+</example>"""
 
 UNDERSTOOD = "Understood."
 
@@ -192,26 +216,42 @@ def system_blocks() -> list[dict]:
     ]
 
 
-def primed_messages(today: datetime.date | None = None) -> list[dict]:
+def primed_messages(now: datetime.datetime | None = None) -> list[dict]:
     """The primed first exchange, prepended to the thread's messages at call
-    time. Today's date lands at the stable END position."""
-    today = today or datetime.date.today()
-    text = PRIMED_INSTRUCTIONS.format(
-        today=today.isoformat(), weekday=today.strftime("%A")
-    )
+    time.
+
+    Two content blocks (design D8): the frozen instructions carrying the cache
+    breakpoint, then the live IST status line LAST. The clock is IST
+    (`Asia/Kolkata`), never the host's local zone: the deployed container runs
+    on UTC, whose date rolls over at 05:30 IST. `now` stays injectable so
+    tests can pin an instant.
+    """
     return [
-        {"role": "user", "content": [{"type": "text", "text": text}]},
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": PRIMED_INSTRUCTIONS,
+                    "cache_control": {"type": "ephemeral"},
+                },
+                {"type": "text", "text": clock.status_line(now)},
+            ],
+        },
         {"role": "assistant", "content": [{"type": "text", "text": UNDERSTOOD}]},
     ]
 
 
 def snapshot_text() -> str:
     """The frozen prompt text recorded in prompt_snapshots: system + the
-    primed turn with its date PLACEHOLDERS (so the hash is date-stable)."""
+    primed turn, with the status line kept as its PLACEHOLDER TEMPLATE so the
+    hash does not change from one minute to the next."""
     return (
         SYSTEM_PROMPT
         + "\n\n--- primed first user turn ---\n\n"
         + PRIMED_INSTRUCTIONS
+        + "\n\n"
+        + clock.STATUS_LINE_TEMPLATE
         + "\n\n--- primed assistant reply ---\n\n"
         + UNDERSTOOD
     )

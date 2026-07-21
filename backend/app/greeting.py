@@ -6,20 +6,115 @@ PII rules (openspec profile-greeting spec, hard requirements):
 - NEVER log URLs or headers carrying credentials.
 - NEVER store or forward any upstream field other than the derived first name.
 - Logs contain at most the upstream status code and request timing.
+
+CHO-226 adds the trading-day greeting: the response carries the selected
+`greetingKey` and its `template` alongside `firstName`. The backend picks the
+key from the market clock and owns the copy; the frontend interpolates, so the
+accent-coloured name span in EmptyState survives (design D1). Templates keep
+their `{clientRef}` placeholder — a fully rendered string would flatten that
+span. Selection can never fail the request: any clock, calendar, or template
+error degrades to DEFAULT. The log line carries the key and a timestamp only,
+never the name.
 """
 
+import datetime
+import json
 import logging
 import time
+from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse
 
-from app import config
+from app import clock, config
 
 logger = logging.getLogger("app.greeting")
 
 router = APIRouter()
+
+GREETINGS_PATH = (
+    Path(__file__).resolve().parent.parent / "content" / "greetings.json"
+)
+
+PLACEHOLDER = "{clientRef}"
+
+# Last-resort copy, used only when content/greetings.json is unreadable or
+# malformed. DEFAULT must stay byte-identical to the pre-CHO-226 static
+# headline ("Hey <name> — what do you need?") — that identity is a spec
+# scenario and a test.
+_FALLBACK_GREETINGS: dict[str, dict[str, str]] = {
+    "templates": {clock.KEY_DEFAULT: "Hey {clientRef} — what do you need?"},
+    "fallbackTemplates": {clock.KEY_DEFAULT: "Hey there — what do you need?"},
+}
+
+
+def load_greetings() -> dict:
+    """Greeting copy from content/greetings.json; never raises."""
+    try:
+        with GREETINGS_PATH.open(encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except Exception as exc:
+        logger.warning(
+            "greetings content unreadable error=%s — using DEFAULT fallback copy",
+            type(exc).__name__,
+        )
+        return _FALLBACK_GREETINGS
+    if not isinstance(payload, dict) or not isinstance(
+        payload.get("templates"), dict
+    ):
+        logger.warning("greetings content malformed — using DEFAULT fallback copy")
+        return _FALLBACK_GREETINGS
+    return payload
+
+
+def _pick_template(content: dict, key: str, first_name: str | None) -> str | None:
+    bucket = "templates" if first_name else "fallbackTemplates"
+    templates = content.get(bucket)
+    if isinstance(templates, dict):
+        template = templates.get(key)
+        if isinstance(template, str) and template:
+            return template
+    return None
+
+
+def select_greeting(
+    first_name: str | None, now: datetime.datetime | None = None
+) -> tuple[str, str]:
+    """(greetingKey, template) for this moment.
+
+    Windows are walked by the market clock: MORNING on any day, MARKET and
+    POST_MARKET on trading days only, a declared special session's key inside
+    its window, DEFAULT when nothing matches. With no first name the template
+    comes from `fallbackTemplates`, which carry no placeholder — so the
+    rendered headline has no double space or dangling punctuation.
+
+    Any failure at all degrades to DEFAULT; this function does not raise.
+    """
+    content = load_greetings()
+    try:
+        snapshot = clock.market_state(now)
+        # Degraded mode is weekday-only guesswork. The agent's status line
+        # hedges and carries on, but a greeting cannot hedge: "markets are
+        # live" on an uncovered Republic Day would simply be a lie. DEFAULT
+        # asserts nothing, so that is what an unavailable or expired calendar
+        # gets (profile-greeting spec: "Calendar unavailable -> DEFAULT").
+        key = clock.KEY_DEFAULT if snapshot.degraded else snapshot.greeting_key
+    except Exception as exc:
+        logger.warning(
+            "greeting window selection failed error=%s — falling back to DEFAULT",
+            type(exc).__name__,
+        )
+        key = clock.KEY_DEFAULT
+
+    template = _pick_template(content, key, first_name)
+    if template is None:
+        # An unknown or uncovered key must still produce a usable headline.
+        key = clock.KEY_DEFAULT
+        template = _pick_template(content, key, first_name) or _pick_template(
+            _FALLBACK_GREETINGS, key, first_name
+        )
+    return key, template or _FALLBACK_GREETINGS["fallbackTemplates"][clock.KEY_DEFAULT]
 
 
 def derive_first_name(full_name: object) -> str | None:
@@ -134,4 +229,17 @@ async def greeting(
     )
     # Only the derived first name leaves this function — nothing else from
     # the upstream payload is stored or forwarded.
-    return {"firstName": derive_first_name(full_name)}
+    first_name = derive_first_name(full_name)
+
+    greeting_key, template = select_greeting(first_name)
+    # Key + timestamp only. The name must never reach the logs.
+    logger.info(
+        "greeting selected greeting_key=%s ts=%s",
+        greeting_key,
+        clock.ist_now().isoformat(timespec="seconds"),
+    )
+    return {
+        "firstName": first_name,
+        "greetingKey": greeting_key,
+        "template": template,
+    }

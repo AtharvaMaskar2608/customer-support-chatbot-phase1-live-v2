@@ -7,7 +7,6 @@ auth expiry) or through a monkeypatched dispatch_outcome (loop mechanics).
 """
 
 import asyncio
-import datetime
 import json
 
 import httpx
@@ -187,14 +186,17 @@ def test_end_turn_streams_text_and_terminates(app):
         assert kwargs["system"][0]["cache_control"] == {"type": "ephemeral"}
         assert len(kwargs["tools"]) == 11  # 9 capability tools + form + ticket
 
-        # primed first turn: bulk instructions + today's date at the END
+        # primed first turn: two blocks — frozen instructions carrying the
+        # cache breakpoint, then the live IST status line LAST (CHO-226 D8).
         messages = kwargs["messages"]
-        primed_text = messages[0]["content"][0]["text"]
-        today = datetime.date.today()
+        primed = messages[0]["content"]
         assert messages[0]["role"] == "user"
-        assert primed_text.rstrip().endswith(
-            f"Today's date is {today.isoformat()} ({today.strftime('%A')})."
-        )
+        assert len(primed) == 2
+        assert primed[0]["cache_control"] == {"type": "ephemeral"}
+        assert "Right now it is" not in primed[0]["text"]
+        assert "cache_control" not in primed[1]
+        assert primed[1]["text"].startswith("Right now it is ")
+        assert " IST on " in primed[1]["text"]
         assert messages[1] == {
             "role": "assistant",
             "content": [{"type": "text", "text": "Understood."}],

@@ -1,0 +1,48 @@
+{
+  "_comment": "NSE/BSE EQUITY segment trading calendar. Source: https://choiceindia.com/stock-market-holidays. Commodity-derivatives holidays are deliberately NOT included — that table differs (e.g. 1 Jan 2026 is a commodity-only closure; equity trades normally that day). Curated by hand, not scraped: the published page bundles both segments. Re-verify every date against its stated weekday when editing. Renew coverage annually — an out-of-coverage date degrades to weekday-only mode by design, it does NOT silently report 'no holidays'.",
+  "segment": "nse-equity",
+  "calendarRef": "nse-equity-2026",
+  "coverageFrom": "2026-01-01",
+  "coverageTo": "2026-12-31",
+
+  "sessions": {
+    "morning": { "key": "MORNING", "start": "06:00", "end": "09:00", "tradingDayRequired": false },
+    "market": { "key": "MARKET", "start": "09:15", "end": "15:30", "tradingDayRequired": true },
+    "postMarket": { "key": "POST_MARKET", "start": "15:30", "end": "23:00", "tradingDayRequired": true }
+  },
+
+  "holidays": [
+    { "date": "2026-01-15", "weekday": "Thursday", "description": "Municipal Corporation Election - Maharashtra", "fallsOnWeekend": false },
+    { "date": "2026-01-26", "weekday": "Monday", "description": "Republic Day", "fallsOnWeekend": false },
+    { "date": "2026-02-15", "weekday": "Sunday", "description": "Mahashivratri", "fallsOnWeekend": true },
+    { "date": "2026-03-03", "weekday": "Tuesday", "description": "Holi", "fallsOnWeekend": false },
+    { "date": "2026-03-21", "weekday": "Saturday", "description": "Id-Ul-Fitr (Ramadan Eid)", "fallsOnWeekend": true },
+    { "date": "2026-03-26", "weekday": "Thursday", "description": "Shri Ram Navami", "fallsOnWeekend": false },
+    { "date": "2026-03-31", "weekday": "Tuesday", "description": "Shri Mahavir Jayanti", "fallsOnWeekend": false },
+    { "date": "2026-04-03", "weekday": "Friday", "description": "Good Friday", "fallsOnWeekend": false },
+    { "date": "2026-04-14", "weekday": "Tuesday", "description": "Dr. Baba Saheb Ambedkar Jayanti", "fallsOnWeekend": false },
+    { "date": "2026-05-01", "weekday": "Friday", "description": "Maharashtra Day", "fallsOnWeekend": false },
+    { "date": "2026-05-28", "weekday": "Thursday", "description": "Bakri Id", "fallsOnWeekend": false },
+    { "date": "2026-06-26", "weekday": "Friday", "description": "Muharram", "fallsOnWeekend": false },
+    { "date": "2026-08-15", "weekday": "Saturday", "description": "Independence Day", "fallsOnWeekend": true },
+    { "date": "2026-09-14", "weekday": "Monday", "description": "Ganesh Chaturthi", "fallsOnWeekend": false },
+    { "date": "2026-10-02", "weekday": "Friday", "description": "Mahatma Gandhi Jayanti", "fallsOnWeekend": false },
+    { "date": "2026-10-20", "weekday": "Tuesday", "description": "Dussehra", "fallsOnWeekend": false },
+    { "date": "2026-11-08", "weekday": "Sunday", "description": "Diwali Laxmi Pujan", "fallsOnWeekend": true },
+    { "date": "2026-11-10", "weekday": "Tuesday", "description": "Diwali-Balipratipada", "fallsOnWeekend": false },
+    { "date": "2026-11-24", "weekday": "Tuesday", "description": "Prakash Gurpurb Sri Guru Nanak Dev", "fallsOnWeekend": false },
+    { "date": "2026-12-25", "weekday": "Friday", "description": "Christmas", "fallsOnWeekend": false }
+  ],
+
+  "specialSessions": [
+    {
+      "date": "2026-11-08",
+      "weekday": "Sunday",
+      "key": "MUHURAT",
+      "description": "Muhurat Trading (Diwali Laxmi Pujan)",
+      "windows": [{ "start": "18:00", "end": "19:00" }],
+      "timingsConfirmed": false,
+      "_note": "A special session makes this date a TRADING DAY even though it is a Sunday and also appears in holidays[] — additions win over subtractions. Exchange publishes exact timings only days in advance; update `windows` and set timingsConfirmed=true once notified. Placeholder reflects the historical ~1h evening session."
+    }
+  ]
+}
