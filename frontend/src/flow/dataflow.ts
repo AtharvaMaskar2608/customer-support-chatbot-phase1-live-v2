@@ -70,6 +70,9 @@ export interface DataFlowDescriptor {
   /** Follow-up under the card ("Tap any holding… · Something look off?"),
    *  or null for none. */
   followup: { text: string; linkLabel: string } | null
+  /** When true the card's follow-up offers a one-tap "Refresh prices" action
+   *  that re-runs the flow, appending a fresh card below (CHO-248 — holdings). */
+  refreshable?: boolean
   /** Which help copy the follow-up link opens. */
   helpKind: HelpKind
 }

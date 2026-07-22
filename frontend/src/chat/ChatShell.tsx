@@ -483,6 +483,13 @@ export function ChatShell({
     }
   }
 
+  /** CHO-248: re-run a refreshable data flow (holdings) for fresher prices,
+   *  appending a fresh card below as a continuation. */
+  function handleRefreshData(flowKey: string) {
+    const descriptor = getDataFlow(flowKey)
+    if (descriptor) void generateData(descriptor)
+  }
+
   function renderResult(
     descriptor: FlowDescriptor,
     values: FlowRun['values'],
@@ -710,6 +717,7 @@ export function ChatShell({
               onDownload={handleDownload}
               onEmailIt={handleEmailIt}
               onHelp={openHelp}
+              onRefreshData={handleRefreshData}
               onResend={handleResend}
               onRaiseTicket={handleRaiseTicket}
               onNoteTap={handleNoteTap}
@@ -742,6 +750,7 @@ function MessageView({
   onDownload,
   onEmailIt,
   onHelp,
+  onRefreshData,
   onResend,
   onRaiseTicket,
   onNoteTap,
@@ -757,6 +766,7 @@ function MessageView({
   onDownload: (fileToken: string, file: FileInfo, ttlSeconds?: number, expiresAt?: string, source?: 'report' | 'contract-note') => void
   onEmailIt: (flowKey: string, values: FlowRun['values']) => void
   onHelp: (kind: HelpKind) => void
+  onRefreshData: (flowKey: string) => void
   onResend: () => void
   onRaiseTicket: () => void
   onNoteTap: (flowMsgId: string, downloadEndpoint: string, note: ClientNote) => void
@@ -875,6 +885,7 @@ function MessageView({
           text={descriptor.followup.text}
           linkLabel={descriptor.followup.linkLabel}
           onClick={() => onHelp(descriptor.helpKind)}
+          onRefresh={descriptor.refreshable ? () => onRefreshData(m.flowKey) : undefined}
         />
       )
     }
