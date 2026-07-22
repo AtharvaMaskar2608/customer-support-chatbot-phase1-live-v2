@@ -88,10 +88,9 @@ export function EmptyState({
         </p>
       </section>
 
+      {/* CHO-234: the "POPULAR RIGHT NOW" eyebrow was removed — the chips are
+          the standard entry points, not an editorialised trend list. */}
       <section className="pt-6">
-        <h3 className="mb-3 text-[11px] font-semibold tracking-[0.14em] text-zinc-400 uppercase dark:text-zinc-500">
-          Popular right now
-        </h3>
         <Stickers onPick={onPick} />
       </section>
     </div>
