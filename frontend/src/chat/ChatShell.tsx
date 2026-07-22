@@ -5,7 +5,7 @@ import { getFlow, matchFlow } from '../flow/registry'
 import { getDataFlow, matchDataFlow } from '../flow/dataRegistry'
 import { isDataFlow, type AnyFlowDescriptor, type DataFlowDescriptor } from '../flow/dataflow'
 import { submitReport, downloadReportFile, type FileInfo, type ReportResult } from '../flow/api'
-import { sendFileToHost } from '../bridge'
+import { handleAuthExpired, sendFileToHost } from '../bridge'
 import { editSlot, fillSlot, lockRun, startRun, type FlowRun } from '../flow/engine'
 import { toHuman, today } from '../flow/dates'
 import type {
@@ -265,6 +265,7 @@ export function ChatShell({
         onError: (code) => {
           clearIndicator()
           if (code === 'AUTH_EXPIRED') {
+            handleAuthExpired('agent') // notify the host once (CHO-231)
             bot(errorLine('AUTH_EXPIRED')) // the shell's session-expired copy
             return
           }
@@ -468,6 +469,7 @@ export function ChatShell({
     remove(narrId)
 
     if (result.kind === 'error') {
+      if (result.code === 'auth_expired') handleAuthExpired('data') // CHO-231
       bot(dataErrorLine(result.code, descriptor.errorNoun))
       return
     }
@@ -487,6 +489,7 @@ export function ChatShell({
     result: ReportResult,
   ) {
     if (result.kind === 'error') {
+      if (result.code === 'AUTH_EXPIRED') handleAuthExpired('report') // CHO-231
       bot(errorLine(result.code))
       return
     }
@@ -540,6 +543,7 @@ export function ChatShell({
     remove(narrId)
 
     if (result.kind === 'error') {
+      if (result.code === 'AUTH_EXPIRED') handleAuthExpired('report') // CHO-231
       bot(errorLine(result.code))
       append({ id: nextId(), kind: 'notesAction', flowMsgId, label: 'Change dates' })
       return
@@ -573,6 +577,7 @@ export function ChatShell({
   ) {
     const result = await downloadContractNote(downloadEndpoint, note.id, session)
     if (result.kind === 'error') {
+      if (result.code === 'AUTH_EXPIRED') handleAuthExpired('report') // CHO-231
       bot(errorLine(result.code))
       return
     }
