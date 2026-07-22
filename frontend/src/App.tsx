@@ -66,7 +66,7 @@ function Header({
           onClick={onRestart}
           className="relative shrink-0 rounded-full bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white dark:bg-zinc-100 dark:text-zinc-900"
         >
-          <span>↻ Restart</span>
+          <span>🏠 Main Menu</span>
         </button>
       ) : (
         <button
@@ -118,7 +118,7 @@ function FloatingControls({
           onClick={onRestart}
           className="relative shrink-0 rounded-full bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white shadow-md dark:bg-zinc-100 dark:text-zinc-900"
         >
-          <span>↻ Restart</span>
+          <span>🏠 Main Menu</span>
         </button>
       ) : (
         <button
