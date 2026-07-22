@@ -19,9 +19,11 @@ SSE contract (design D9, pinned with the frontend):
             (lastSeq = the thread's last turn seq — the CHO-217 feedback
             anchor for the exchange's answer messages)
   error     {"error": "AGENT_UNAVAILABLE"|"AUTH_EXPIRED"}      — terminal
-Exactly one terminal event is emitted per stream. AUTH_EXPIRED from a tool is
-still fed to the model as an is_error tool_result (it narrates), and then
-replaces `done` as the terminal event so the shell can react.
+Exactly one terminal event is emitted per stream. AUTH_EXPIRED from a tool
+short-circuits the loop (CHO-231): its is_error tool_result is still recorded
+(byte-faithful replay), but the round ends immediately with the terminal
+AUTH_EXPIRED event so the shell can react — the model is never asked to narrate
+the expiry.
 
 PII: this module logs exception type names, counts, and timings only — never
 message text, tool inputs, or envelopes.
@@ -387,14 +389,19 @@ async def _chat_events(
                     },
                 )
                 return
+            # CHO-231: auth expiry short-circuits the loop. The is_error
+            # tool_result is already recorded above (byte-faithful replay), but
+            # we end the turn NOW with the terminal AUTH_EXPIRED event rather
+            # than looping back to the model — the model must never narrate the
+            # expiry. Non-auth errors (NO_DATA / UPSTREAM_ERROR) still continue.
+            if auth_expired:
+                yield _sse("error", {"error": "AUTH_EXPIRED"})
+                return
             continue
 
-        # Terminal: end_turn (or any non-tool stop). Exactly one terminal
-        # event: AUTH_EXPIRED (after the model's narration) when a tool
-        # surfaced auth expiry, else done with the derived counters.
-        if auth_expired:
-            yield _sse("error", {"error": "AUTH_EXPIRED"})
-            return
+        # Terminal: end_turn (or any non-tool stop) ends with `done` and the
+        # derived counters. Auth expiry is short-circuited above in the
+        # tool-round branch (CHO-231), so it never reaches here.
         counters = agent_caps.evaluate(thread)
         yield _sse(
             "done",

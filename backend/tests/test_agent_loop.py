@@ -578,27 +578,60 @@ def test_anthropic_failure_midway_still_terminates_with_error(app, monkeypatch):
 
 
 @respx.mock
-def test_auth_expired_narrated_then_terminal_error(app):
+def test_auth_expired_short_circuits_without_narration(app):
+    """CHO-231: a tool round returning AUTH_EXPIRED ends the turn immediately —
+    exactly ONE terminal `error: AUTH_EXPIRED` event, NO continuation model
+    call, and NO assistant narration text. The script only has the tool round;
+    a second model call would pop an empty script and fail."""
     respx.post(config.upstream_holdings_url()).mock(
         return_value=httpx.Response(401)
     )
-    fake = FakeAnthropic([
-        _tool_msg(_tool_use("get_holdings")),
-        _text_msg("Your FinX session has expired — please sign in again."),
-    ])
+    fake = FakeAnthropic([_tool_msg(_tool_use("get_holdings"))])
     with TestClient(app) as client:
         app.state.anthropic_client = fake
         resp = _post_chat(client, "my holdings")
         events = _parse_events(resp)
 
-    # tool errored, model narrated (second call happened), then the pinned
-    # AUTH_EXPIRED error is the single terminal event — no done after it
-    assert len(fake.calls) == 2
+    # short-circuit: no continuation model call, no narration text at all
+    assert len(fake.calls) == 1
+    assert not [e for e, _ in events if e == "text"]
     finished = [d for e, d in events if e == "tool" and d["status"] == "finished"]
     assert finished[0]["is_error"] is True
-    assert ("text", {"delta": "Your FinX session has expired — please sign in again."}) in events
+    # exactly one terminal event: the pinned AUTH_EXPIRED error, never a done
     assert events[-1] == ("error", {"error": "AUTH_EXPIRED"})
     assert "done" not in [e for e, _ in events]
+
+    # the is_error tool_result is still recorded (byte-faithful replay)
+    thread = _get_thread(app)
+    assert [t.kind for t in thread.turns] == [
+        "user_text", "assistant_tool_use", "tool_result",
+    ]
+    assert thread.turns[-1].meta["is_error"] is True
+
+
+def test_non_auth_error_round_still_continues_to_model(app, monkeypatch):
+    """A NO_DATA/UPSTREAM_ERROR result is is_error but not auth expiry: the
+    loop still bounces it back to the model (which narrates), and the terminal
+    event is `done`, never AUTH_EXPIRED (CHO-231 leaves this path unchanged)."""
+    async def fake_dispatch(name, tool_input, ctx):
+        return DispatchOutcome(
+            content='{"kind":"no_data"}', is_error=True, duration_ms=2,
+            envelope={"kind": "no_data"}, error_code="NO_DATA",
+        )
+
+    monkeypatch.setattr("app.agent.tools.dispatch_outcome", fake_dispatch)
+    fake = FakeAnthropic([
+        _tool_msg(_tool_use("get_pnl_report")),
+        _text_msg("I couldn't find any P&L for that period."),
+    ])
+    with TestClient(app) as client:
+        app.state.anthropic_client = fake
+        events = _parse_events(_post_chat(client, "pnl for april"))
+
+    assert len(fake.calls) == 2  # errored round still continues to the model
+    assert ("text", {"delta": "I couldn't find any P&L for that period."}) in events
+    assert events[-1][0] == "done"
+    assert "error" not in [e for e, _ in events]
 
 
 # --- credential isolation end-to-end ------------------------------------------

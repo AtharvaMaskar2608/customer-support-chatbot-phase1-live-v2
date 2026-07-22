@@ -1,5 +1,6 @@
 import { useEffect, useSyncExternalStore } from 'react'
 import { hasCredentials, type SessionContext } from './session'
+import { handleAuthExpired } from './bridge'
 
 /**
  * Personalized greeting (profile-greeting capability, frontend half).
@@ -69,7 +70,12 @@ async function load(session: SessionContext): Promise<void> {
         'X-User-Id': session.userId!,
       },
     })
-    if (!res.ok) return
+    if (!res.ok) {
+      // 401 AUTH_EXPIRED (per the pinned contract) → notify the host once; the
+      // greeting itself still degrades silently to the static copy, unchanged.
+      if (res.status === 401) handleAuthExpired('profile')
+      return
+    }
     const body: unknown = await res.json().catch(() => null)
     if (body === null || typeof body !== 'object') return
     const record = body as Record<string, unknown>

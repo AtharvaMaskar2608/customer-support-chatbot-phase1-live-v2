@@ -118,6 +118,46 @@ export function sendInlineFileToHost(
   return true
 }
 
+/* ── session expiry: one host signal per expiry (CHO-231) ───────────────── */
+
+/** Which sink first observed the FinX session expiry (host bookkeeping only). */
+export type SessionExpiredTrigger = 'profile' | 'agent' | 'report' | 'data'
+
+/**
+ * Tell the native host the FinX session has expired. Posts a versioned
+ * `session.expired` envelope (same shape as `file.ready`) via the Android
+ * bridge. Returns true once posted, false when there is no bridge — the plain
+ * browser, where the page keeps showing its own session-expired copy.
+ */
+export function sendSessionExpiredToHost(trigger: SessionExpiredTrigger): boolean {
+  const bridge = androidBridge()
+  if (bridge === null) return false
+  const payload = {
+    type: 'session.expired',
+    v: 1,
+    id: correlationId('s'),
+    ts: new Date().toISOString(),
+    payload: { trigger },
+  }
+  bridge.postMessage(JSON.stringify(payload))
+  return true
+}
+
+let sessionExpiredFired = false
+
+/**
+ * The single funnel every AUTH_EXPIRED sink calls. Fires the `session.expired`
+ * host signal AT MOST ONCE per expiry (module-level latch) — the first sink to
+ * observe the expiry posts it; later sinks are no-ops. It changes NO UI: each
+ * caller keeps rendering its own session-expired copy exactly as before. A page
+ * reload (the only way back in after reopening from FinX) resets the latch.
+ */
+export function handleAuthExpired(trigger: SessionExpiredTrigger): void {
+  if (sessionExpiredFired) return
+  sessionExpiredFired = true
+  sendSessionExpiredToHost(trigger)
+}
+
 /* ── reverse channel: host → page (file.downloaded / file.expired) ──────── */
 
 /** The host replies with one of these once it has acted on a `file.ready`. */
