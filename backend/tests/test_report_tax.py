@@ -8,6 +8,7 @@ live network.
 """
 
 import logging
+from datetime import datetime, timezone
 
 import httpx
 import pytest
@@ -92,6 +93,24 @@ def test_download_pdf_returns_token_and_hides_upstream_url(client):
     assert PDF_URL not in resp.text
     assert "client-report.choiceindia.com" not in resp.text
     assert payload["fileToken"] != PDF_URL
+
+
+@respx.mock
+def test_download_envelope_carries_token_expiry(client):
+    """CHO-230: additive token-expiry fields on the download envelope."""
+    _mock_tax(_tax_success(PDF_URL))
+    _mock_artifact(PDF_URL, PDF_BYTES, "application/pdf")
+
+    payload = client.post(
+        "/api/report/tax", headers=HEADERS, json=DOWNLOAD_BODY
+    ).json()
+
+    ttl = config.report_file_ttl_seconds()
+    assert payload["ttlSeconds"] == ttl
+    expires_at = datetime.fromisoformat(payload["expiresAt"])
+    assert expires_at.tzinfo is not None  # timezone-aware UTC timestamp
+    delta = (expires_at - datetime.now(timezone.utc)).total_seconds()
+    assert 0 < delta <= ttl + 5
 
 
 @respx.mock

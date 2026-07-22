@@ -29,7 +29,12 @@ from app.agent.ctx import (
 )
 from app.agent.events import friendly_range, record_flow_event
 from app.finx.client import FinxClient, ResultKind
-from app.finx.delivery import fetch_artifact, mask_email, size_label
+from app.finx.delivery import (
+    download_delivery,
+    fetch_artifact,
+    mask_email,
+    size_label,
+)
 from app.finx.routing import Endpoint
 
 logger = logging.getLogger("app.report")
@@ -158,16 +163,15 @@ async def run_pnl(
         content_type="application/pdf",
         session_id=ctx.session_id,
     )
-    return {
-        "delivery": "download",
-        "file": {
+    return download_delivery(
+        {
             "name": filename,
             "sizeLabel": size_label(len(data)),
             "format": "PDF",
             "passwordProtected": False,  # tester-verified: upstream PDFs are not protected (CHO-220)
         },
-        "fileToken": token,
-    }
+        token,
+    )
 
 
 @router.post("/api/report/pnl")

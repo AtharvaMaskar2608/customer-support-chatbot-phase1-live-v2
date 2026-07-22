@@ -4,7 +4,8 @@ import { hasCredentials, type SessionContext } from '../session'
 import { getFlow, matchFlow } from '../flow/registry'
 import { getDataFlow, matchDataFlow } from '../flow/dataRegistry'
 import { isDataFlow, type AnyFlowDescriptor, type DataFlowDescriptor } from '../flow/dataflow'
-import { submitReport, downloadReportFile, type ReportResult } from '../flow/api'
+import { submitReport, downloadReportFile, type FileInfo, type ReportResult } from '../flow/api'
+import { sendFileToHost } from '../bridge'
 import { editSlot, fillSlot, lockRun, startRun, type FlowRun } from '../flow/engine'
 import { toHuman, today } from '../flow/dates'
 import type {
@@ -507,6 +508,8 @@ export function ChatShell({
       values,
       file: result.file,
       fileToken: result.fileToken,
+      ttlSeconds: result.ttlSeconds,
+      expiresAt: result.expiresAt,
       passwordNote: descriptor.result.passwordNote,
       helpKind: descriptor.result.helpKind,
     })
@@ -582,6 +585,9 @@ export function ChatShell({
       values: {},
       file: result.file,
       fileToken: result.fileToken,
+      ttlSeconds: result.ttlSeconds,
+      expiresAt: result.expiresAt,
+      source: 'contract-note',
       passwordNote: descriptor.result.passwordNote,
       helpKind: descriptor.result.helpKind,
       emailable: false, // contract notes have no email delivery
@@ -606,8 +612,17 @@ export function ChatShell({
 
   /* ── result-card actions ────────────────────────────────────────────── */
 
-  function handleDownload(fileToken: string, fileName: string) {
-    void downloadReportFile(fileToken, fileName)
+  function handleDownload(
+    fileToken: string,
+    file: FileInfo,
+    ttlSeconds?: number,
+    expiresAt?: string,
+    source: 'report' | 'contract-note' = 'report',
+  ) {
+    // Native host first (CHO-230): hand the file to Android via the bridge.
+    // No bridge → the browser download stays the web fallback.
+    if (sendFileToHost(fileToken, file, { source, ttlSeconds, expiresAt })) return
+    void downloadReportFile(fileToken, file.name)
   }
   function handleEmailIt(flowKey: string, values: FlowRun['values']) {
     const descriptor = getFlow(flowKey)
@@ -734,7 +749,7 @@ function MessageView({
   onEdit: (msgId: string, slotKey: string) => void
   onDeliver: (msgId: string, descriptor: FlowDescriptor, run: FlowRun, mode: DeliveryMode) => void
   onSticker: (descriptor: AnyFlowDescriptor) => void
-  onDownload: (fileToken: string, fileName: string) => void
+  onDownload: (fileToken: string, file: FileInfo, ttlSeconds?: number, expiresAt?: string, source?: 'report' | 'contract-note') => void
   onEmailIt: (flowKey: string, values: FlowRun['values']) => void
   onHelp: (kind: HelpKind) => void
   onResend: () => void
@@ -799,7 +814,7 @@ function MessageView({
             file={m.file}
             passwordNote={m.passwordNote}
             emailable={m.emailable ?? true}
-            onDownload={() => onDownload(m.fileToken, m.file.name)}
+            onDownload={() => onDownload(m.fileToken, m.file, m.ttlSeconds, m.expiresAt, m.source)}
             onEmailIt={() => onEmailIt(m.flowKey, m.values)}
             onHelp={() => onHelp(m.helpKind)}
           />

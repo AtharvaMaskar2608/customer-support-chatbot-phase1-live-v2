@@ -13,6 +13,7 @@
  * button feedback side: it is NEVER echoed into the conversation.
  */
 
+import { sendInlineFileToHost } from '../../bridge'
 import type { HoldingRow } from './holdings'
 
 const HEADER = [
@@ -67,13 +68,18 @@ export function buildHoldingsCsv(rows: readonly HoldingRow[]): string {
   return lines.join('\r\n')
 }
 
-/** Build + hand the CSV to the browser as a download. Returns success. */
+/** Build + hand the CSV off. Native host first (CHO-230): the inline bridge
+ *  gets the CSV when running in the Android WebView; otherwise the browser Blob
+ *  download stays the web fallback. Returns success. */
 export function downloadHoldingsCsv(rows: readonly HoldingRow[], userCode: string): boolean {
+  const csv = buildHoldingsCsv(rows)
+  const filename = holdingsCsvFilename(userCode)
+  if (sendInlineFileToHost(filename, csv)) return true
   try {
-    const blob = new Blob([buildHoldingsCsv(rows)], { type: 'text/csv' })
+    const blob = new Blob([csv], { type: 'text/csv' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
-    a.download = holdingsCsvFilename(userCode)
+    a.download = filename
     document.body.appendChild(a)
     a.click()
     a.remove()
