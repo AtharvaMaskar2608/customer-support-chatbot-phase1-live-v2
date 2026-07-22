@@ -99,7 +99,7 @@ async def _dispatch(name, params, **ctx_extra):
 
 def test_no_credential_fields_in_any_schema():
     schemas = agent_tools.tool_schemas()
-    assert len(schemas) == 11  # 8 capabilities (notes = 2 tools) + form + ticket
+    assert len(schemas) == 12  # 8 capabilities (notes=2) + form + ticket + get_report_columns (CHO-228)
     for schema in schemas:
         for name in _walk_property_names(schema["input_schema"]):
             assert _normalize(name) not in FORBIDDEN_PARAM_NAMES, (

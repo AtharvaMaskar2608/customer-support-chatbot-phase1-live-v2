@@ -1,0 +1,99 @@
+{
+  "version": "2026-07-22.1",
+  "reports": {
+    "pnl": {
+      "title": "P&L Report",
+      "note": "Same columns for Equity, F&O and Commodity.",
+      "columns": [
+        {"label": "Security", "meaning": "The stock or instrument this row is for."},
+        {"label": "Open (Qty / Price / Amount)", "meaning": "Your opening position carried into the period — its quantity, price and value."},
+        {"label": "Buy (Qty / Price)", "meaning": "What you bought during the period — quantity and average buy price."},
+        {"label": "Sell (Qty / Price)", "meaning": "What you sold during the period — quantity and average sell price."},
+        {"label": "Net Qty (Qty / Price / Amount)", "meaning": "Your net position after buys and sells — its quantity, price and value."},
+        {"label": "CL. Price", "meaning": "Closing price — the security's closing market price for the period."},
+        {"label": "Realized P&L", "meaning": "Profit or loss on positions you closed (sold) during the period."},
+        {"label": "Unrealized P&L", "meaning": "Profit or loss on positions you still hold, marked to the closing price."}
+      ]
+    },
+    "tax": {
+      "title": "Tax Report (Capital Gains)",
+      "note": "Has two tables: A. Transactions (per transaction) and B. Summary by Security (aggregated).",
+      "columns": [
+        {"section": "A. Transactions", "label": "Security Name", "meaning": "The name of the security transacted."},
+        {"section": "A. Transactions", "label": "Txn Type", "meaning": "Transaction type — delivery, intraday, or F&O."},
+        {"section": "A. Transactions", "label": "ISIN", "meaning": "The security's ISIN, its unique international identifier."},
+        {"section": "A. Transactions", "label": "Scrip Symbol", "meaning": "The security's trading symbol."},
+        {"section": "A. Transactions", "label": "Fair Market Value", "meaning": "FMV — the grandfathered value (e.g. the 31 Jan 2018 price) used as the cost for long-term capital gains."},
+        {"section": "A. Transactions", "label": "Net Qty", "meaning": "Net quantity transacted."},
+        {"section": "A. Transactions", "label": "Buy Date", "meaning": "The purchase (acquisition) date."},
+        {"section": "A. Transactions", "label": "Buy Value", "meaning": "The purchase cost."},
+        {"section": "A. Transactions", "label": "Sell Date", "meaning": "The sale (disposal) date."},
+        {"section": "A. Transactions", "label": "Sell Value", "meaning": "The sale proceeds."},
+        {"section": "A. Transactions", "label": "Short Term", "meaning": "Short-term capital gain or loss on the transaction."},
+        {"section": "A. Transactions", "label": "Long Term", "meaning": "Long-term capital gain or loss on the transaction."},
+        {"section": "A. Transactions", "label": "Speculation", "meaning": "Speculative income — intraday, non-delivery equity gains or losses."},
+        {"section": "A. Transactions", "label": "Derv Comm", "meaning": "Derivative and commodity income."},
+        {"section": "B. Summary by Security", "label": "Security Name", "meaning": "The name of the security."},
+        {"section": "B. Summary by Security", "label": "Txn Type", "meaning": "Transaction type — delivery, intraday, or F&O."},
+        {"section": "B. Summary by Security", "label": "ISIN", "meaning": "The security's ISIN identifier."},
+        {"section": "B. Summary by Security", "label": "# Transactions", "meaning": "Number of transactions for this security."},
+        {"section": "B. Summary by Security", "label": "Total Buy Value", "meaning": "Total purchase cost across the security's transactions."},
+        {"section": "B. Summary by Security", "label": "Total Sell Value", "meaning": "Total sale proceeds across the security's transactions."},
+        {"section": "B. Summary by Security", "label": "Total Short Term", "meaning": "Total short-term capital gain or loss for the security."},
+        {"section": "B. Summary by Security", "label": "Total Long Term", "meaning": "Total long-term capital gain or loss for the security."},
+        {"section": "B. Summary by Security", "label": "Total Speculation", "meaning": "Total speculative (intraday) gain or loss for the security."},
+        {"section": "B. Summary by Security", "label": "Total Derv Comm", "meaning": "Total derivative and commodity income for the security."},
+        {"section": "B. Summary by Security", "label": "Net P&L", "meaning": "Net profit or loss for the security across all its transactions."}
+      ]
+    },
+    "ledger": {
+      "title": "Ledger",
+      "note": "Same columns for the Normal Ledger and the MTF Ledger.",
+      "columns": [
+        {"label": "Date", "meaning": "The date of the ledger entry."},
+        {"label": "V.No", "meaning": "Voucher name — the reference of the accounting entry."},
+        {"label": "Particulars", "meaning": "Description of the entry (what it was for)."},
+        {"label": "Debit", "meaning": "Amount debited from your ledger."},
+        {"label": "Credit", "meaning": "Amount credited to your ledger."},
+        {"label": "Balance", "meaning": "Your running ledger balance after the entry."}
+      ]
+    },
+    "contract-note": {
+      "title": "Contract Note cum Tax Invoice",
+      "note": "Per security, split into Buy and Sell sides.",
+      "columns": [
+        {"label": "ISIN", "meaning": "The security's ISIN identifier."},
+        {"label": "Security Name/Symbol", "meaning": "The security's name and trading symbol."},
+        {"label": "Buy Qty", "meaning": "Quantity bought."},
+        {"label": "Buy WAP", "meaning": "Weighted average price of your buys."},
+        {"label": "Buy Brokerage/Share", "meaning": "Brokerage charged per share on the buys."},
+        {"label": "Buy WAP after Brokerage", "meaning": "Weighted average buy price including brokerage."},
+        {"label": "Total BUY Value after Brokerage", "meaning": "Total value of the buys including brokerage."},
+        {"label": "Sell Qty", "meaning": "Quantity sold."},
+        {"label": "Sell WAP", "meaning": "Weighted average price of your sells."},
+        {"label": "Sell Brokerage/Share", "meaning": "Brokerage charged per share on the sells."},
+        {"label": "Sell WAP after Brokerage", "meaning": "Weighted average sell price including brokerage."},
+        {"label": "Total SELL Value after Brokerage", "meaning": "Total value of the sells including brokerage."},
+        {"label": "Net Qty", "meaning": "Net quantity after buys and sells."},
+        {"label": "Net Obligation (Rs)", "meaning": "The net amount payable to or receivable from you after buys, sells and charges."}
+      ]
+    },
+    "holdings": {
+      "title": "Holdings",
+      "note": "Your current portfolio positions.",
+      "columns": [
+        {"label": "Instrument", "meaning": "The holding's instrument (stock or security)."},
+        {"label": "Exchange", "meaning": "The exchange it is held on (e.g. NSE, BSE)."},
+        {"label": "QTY", "meaning": "Quantity held."},
+        {"label": "LOT", "meaning": "Lot size."},
+        {"label": "Avg. Price", "meaning": "Your average buy price for the holding."},
+        {"label": "LTP", "meaning": "Last traded price — the current market price."},
+        {"label": "Invested Amt.", "meaning": "Total amount you invested in the holding."},
+        {"label": "Current Value", "meaning": "Current market value of the holding."},
+        {"label": "Returns", "meaning": "Absolute profit or loss on the holding."},
+        {"label": "Returns %", "meaning": "Profit or loss as a percentage of the invested amount."},
+        {"label": "Product", "meaning": "Product type — CNC (delivery), MIS (intraday), or MTF."}
+      ]
+    }
+  }
+}

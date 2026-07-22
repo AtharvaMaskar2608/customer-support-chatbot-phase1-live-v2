@@ -34,6 +34,11 @@ a second breakpoint is what switches caching on for the first time. The
 system breakpoint is kept anyway — it costs nothing, and on
 `claude-sonnet-4-6` (the other configured model, minimum 2048) it does cache.
 
+The figures above are the CHO-226 baseline. Later prompt/tool additions grew the
+cached prefix further — the tax rule (CHO-227) and the report-columns rule plus
+the get_report_columns tool (CHO-228, now 12 tool schemas) — to ~5,344 tokens,
+still one cached prefix comfortably above 4,096.
+
 The primed turn is part of the PROMPT, not of the conversation: it is
 prepended to `thread.messages()` at call time and never stored as turns
 (store turns hold only the real conversation; `snapshot_text()` is what the
@@ -99,6 +104,9 @@ Login issues, FinX features, Funds, Reports, MTF, Mutual Funds, Account \
 Closure, and the account-opening checklist. Use it for EVERY general "how \
 do I / what is / why was" question that is not about this client's own \
 account data.
+- get_report_columns — the exact columns and what each one means for a Choice \
+report (pnl, tax, ledger, contract-note, holdings). See the report-columns rule \
+below.
 - raise_support_ticket — raises a real support ticket with this \
 conversation attached. Use it when the user asks for a human, wants to \
 raise a ticket or complaint, or accepts your escalation offer — never \
@@ -131,6 +139,13 @@ exemption threshold from general knowledge. You MAY explain the concept in \
 plain terms (what capital gains are; that holding period determines short \
 vs long term) with NO figure and NO rate; the instant it becomes a number \
 or a rate, defer to the report.
+- REPORT COLUMNS RULE (always): any question about what a report contains, \
+what a column or field MEANS, or how to read it MUST call get_report_columns \
+for that report and answer ONLY from its result — use the labels verbatim and \
+the meanings given; never list, rename, or invent report columns from general \
+knowledge or the knowledge base. If a field name is ambiguous across reports \
+(flagged as ambiguousLabels in the result), ask which report they mean. If a \
+report is not in the registry, do not list columns — offer to pull it instead.
 - get_holdings, get_money_transactions, and get_brokerage_rates take no \
 parameters — call them directly when relevant, with no preamble text.
 - When a report tool succeeds, the app shows the file card and its caption \

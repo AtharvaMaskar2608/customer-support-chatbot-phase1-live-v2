@@ -184,7 +184,7 @@ def test_end_turn_streams_text_and_terminates(app):
         assert kwargs["max_tokens"] == 4096
         assert "thinking" not in kwargs  # AGENT_THINKING=off omits it
         assert kwargs["system"][0]["cache_control"] == {"type": "ephemeral"}
-        assert len(kwargs["tools"]) == 11  # 9 capability tools + form + ticket
+        assert len(kwargs["tools"]) == 12  # 9 capability tools + form + ticket + get_report_columns (CHO-228)
 
         # primed first turn: two blocks — frozen instructions carrying the
         # cache breakpoint, then the live IST status line LAST (CHO-226 D8).
