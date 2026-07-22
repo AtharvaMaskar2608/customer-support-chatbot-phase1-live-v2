@@ -11,6 +11,7 @@
  */
 
 import { useEffect, useState, type ReactNode } from 'react'
+import { RefreshIcon } from '../../icons'
 import { DOWN_TEXT, UP_TEXT } from './tokens'
 import { useCountUp } from './useCountUp'
 
@@ -258,22 +259,36 @@ export function EmptyCardLine({ children }: Readonly<{ children: ReactNode }>) {
   )
 }
 
-/** Follow-up line under a data card: plain text · accent help link. */
+/** Follow-up under a data card: plain text · accent help link, plus an
+ *  optional "Refresh prices" action (CHO-248) that re-runs the flow and
+ *  appends a fresh card below as a continuation. */
 export function DataFollowup({
   text,
   linkLabel,
   onClick,
-}: Readonly<{ text: string; linkLabel: string; onClick: () => void }>) {
+  onRefresh,
+}: Readonly<{ text: string; linkLabel: string; onClick: () => void; onRefresh?: () => void }>) {
   return (
-    <p className="text-[13px] text-zinc-500 dark:text-zinc-400">
-      {text} ·{' '}
-      <button
-        type="button"
-        onClick={onClick}
-        className="font-semibold text-accent dark:text-accent-soft"
-      >
-        {linkLabel}
-      </button>
-    </p>
+    <div className="flex flex-col gap-2">
+      <p className="text-[13px] text-zinc-500 dark:text-zinc-400">
+        {text} ·{' '}
+        <button
+          type="button"
+          onClick={onClick}
+          className="font-semibold text-accent dark:text-accent-soft"
+        >
+          {linkLabel}
+        </button>
+      </p>
+      {onRefresh && (
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="inline-flex w-fit items-center gap-1.5 rounded-full border-[1.5px] border-zinc-200 bg-white px-3.5 py-1.5 text-[13px] font-semibold text-accent transition-colors hover:border-accent-soft hover:bg-accent-tint dark:border-zinc-700 dark:bg-zinc-900 dark:text-accent-soft dark:hover:bg-accent/15"
+        >
+          <RefreshIcon className="size-4" /> Refresh prices
+        </button>
+      )}
+    </div>
   )
 }

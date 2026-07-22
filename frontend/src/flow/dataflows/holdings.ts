@@ -27,6 +27,7 @@ const holdings: DataFlowDescriptor = {
   emptyLine: 'No holdings in your demat yet',
   errorNoun: 'your holdings',
   followup: { text: 'Tap any holding for the full breakdown', linkLabel: 'Something look off?' },
+  refreshable: true, // CHO-248: offer a one-tap "Refresh prices" re-run
   helpKind: 'holding',
 }
 
