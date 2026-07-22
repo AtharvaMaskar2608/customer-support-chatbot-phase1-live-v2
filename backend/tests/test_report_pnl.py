@@ -365,8 +365,9 @@ def test_download_success_records_flow_event(memory_client):
 
 
 @respx.mock
-def test_upstream_failure_records_no_flow_event(memory_client):
-    """Only success becomes memory."""
+def test_no_data_records_no_data_flow_event(memory_client):
+    """A no-data report attempt IS memoed (CHO-253), so the model's next reply
+    is aware of the miss instead of blind to it."""
     import time
 
     client = memory_client
@@ -374,7 +375,45 @@ def test_upstream_failure_records_no_flow_event(memory_client):
         200, json={"Status": "Fail", "Response": "", "Reason": "No Data Found"}
     ))
     resp = client.post("/api/report/pnl", headers=HEADERS, json=DOWNLOAD_BODY)
-    assert resp.status_code != 200
+    assert resp.status_code == 404
+    assert resp.json() == {"error": "NO_DATA"}
+
+    time.sleep(0.05)
+    import asyncio
+
+    store = client.app.state.conversation_store
+    thread = asyncio.run(store.get_thread(HEADERS["X-Session-Id"]))
+    assert len(thread.turns) == 1
+    turn = thread.turns[0]
+    assert turn.kind == "flow_event"
+    assert turn.meta["outcome"] == "no_data"
+    memo = turn.content[0]["text"]
+    assert memo.startswith("[App event")
+    assert "P&L" in memo
+    assert "Equity" in memo
+    assert "no records were found" in memo
+    assert "downloaded successfully" not in memo
+    assert turn.meta["slots"] == {
+        "segment": "Equity",
+        "fromDate": "2026-04-01",
+        "toDate": "2026-07-21",
+    }
+    # Memory carries labels only — never the report URL or session token.
+    dump = memo + str(turn.meta)
+    assert ARTIFACT_URL not in dump
+    assert HEADERS["X-Session-Id"] not in dump
+
+
+@respx.mock
+def test_upstream_error_records_no_flow_event(memory_client):
+    """A transient upstream error is NOT memoed — only no-data and success are."""
+    import time
+
+    client = memory_client
+    _mock_pnl(httpx.Response(500))
+    resp = client.post("/api/report/pnl", headers=HEADERS, json=DOWNLOAD_BODY)
+    assert resp.status_code == 502
+    assert resp.json() == {"error": "UPSTREAM_ERROR"}
 
     time.sleep(0.05)
     import asyncio
