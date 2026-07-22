@@ -15,10 +15,12 @@ const TINT: Record<TintKey, string> = {
   rose: 'bg-rose-100 text-rose-600 dark:bg-rose-500/20 dark:text-rose-400',
 }
 
-/** File + data flows on one ordering scale (Holdings is 0, ahead of P&L). */
-const ALL_FLOWS: AnyFlowDescriptor[] = [...FLOWS, ...DATA_FLOWS].sort(
-  (a, b) => a.order - b.order,
-)
+/** File + data flows on one ordering scale (Holdings is 0, ahead of P&L).
+ *  `hideSticker` flows (CHO-233: brokerage) stay registered + keyword-routable
+ *  but are dropped from the home chip grid. */
+const ALL_FLOWS: AnyFlowDescriptor[] = [...FLOWS, ...DATA_FLOWS]
+  .filter((flow) => !flow.hideSticker)
+  .sort((a, b) => a.order - b.order)
 
 /**
  * The quick-action sticker row. Rendered from the auto-discovered flow
