@@ -399,12 +399,9 @@ async def _chat_events(
                 return
             continue
 
-        # Terminal: end_turn (or any non-tool stop). Exactly one terminal
-        # event: AUTH_EXPIRED (after the model's narration) when a tool
-        # surfaced auth expiry, else done with the derived counters.
-        if auth_expired:
-            yield _sse("error", {"error": "AUTH_EXPIRED"})
-            return
+        # Terminal: end_turn (or any non-tool stop) ends with `done` and the
+        # derived counters. Auth expiry is short-circuited above in the
+        # tool-round branch (CHO-231), so it never reaches here.
         counters = agent_caps.evaluate(thread)
         yield _sse(
             "done",
