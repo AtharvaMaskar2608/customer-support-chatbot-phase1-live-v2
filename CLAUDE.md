@@ -37,3 +37,13 @@ Typical shipping sequence after verification: `git-sync` (ship) → `linear-conn
 - Backend: `cd backend && uv run uvicorn app.main:app --port 8000` (tests: `uv run pytest`)
 - Frontend: `cd frontend && npm run dev` → :5173 (proxies `/api` → :8000); build: `npm run build` (app + widget entries)
 - Widget demo: `http://localhost:5173/demo/index.html?userId=...&sessionId=...&accessToken=...&isDarkTheme=false` (values from `.env`)
+
+## Deploying
+
+Full runbook: **`docs/deployment.md`**. Two images (`backend` / `frontend`) tagged `…vX.Y.Z`, tracked in `docker-compose.yml`. Bump only the component that changed (frontend-only change → new `frontendvX.Y.Z`, backend stays).
+
+ECR push is IAM-blocked, so prod runs via the **tarball path**, not `docker compose pull`:
+1. Build: `docker build -t 829433345651.dkr.ecr.ap-south-1.amazonaws.com/customer-support-chatbot:frontendvX.Y.Z frontend/` and bump the tag in `docker-compose.yml`.
+2. Package: `docker save <image> | gzip > jini-frontend-vX.Y.Z.tar.gz` (gitignored).
+3. **Ship (user-only — the prod box takes a password, not our SSH key):** `scp` the tarball to `harsh@10.132.147.130:/home/harsh/jini/`, then on the server `docker load < …tar.gz` → `docker rm -f jini-frontend` → `docker run -d --name jini-frontend --network jini-net --restart unless-stopped -p 8080:80 <image>`. Backend container is left as-is.
+4. Verify: `curl https://jini-chatbot.quanthm.com/` (200), `/widget.js` (200), `/api/greeting` (400 = alive).

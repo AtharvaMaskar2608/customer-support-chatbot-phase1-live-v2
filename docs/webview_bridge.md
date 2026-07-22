@@ -13,6 +13,8 @@ that gives the app no download entry, no notification, and no completion signal 
 for the native host we route through this bridge instead. On plain web (no bridge),
 the existing browser download stays exactly as-is.
 
+> **Quick index:** [§9 — Payload reference](#9-payload-reference-every-event-at-a-glance) is a one-table catalog of every event the bridge emits (what fires it, the discriminator, the fields to read). Start there, then use the sections below for handling detail.
+
 ---
 
 ## 1. Transport
@@ -132,6 +134,7 @@ The holdings "overall report" CSV is built **in the browser** from the data alre
     "mimeType": "text/csv",
     "format": "CSV",
     "passwordProtected": false,
+    "auth": "none",
     "contentBase64": "<UTF-8 CSV, base64-encoded>",
     "source": "holdings-csv"
   }
@@ -237,3 +240,45 @@ The report download envelope **today** returns:
 ```
 
 It does **not** carry expiry. For the `url` variant to report `tokenExpiresAt` / `ttlSeconds` honestly, the backend adds them to that envelope, computed from the configured TTL at build time on the **wall clock** (`datetime.now(UTC) + ttlSeconds`) — the store's internal `expires_at` is a `monotonic()` value and must not be used for a timestamp. The web layer resolves `fileToken` → an absolute `url` from its own page origin. Small, contained change; no native change once the fields are present.
+
+---
+
+## 9. Payload reference: every event at a glance
+
+The complete catalog — every payload the bridge can carry, in one place. All inbound events share the [§2 envelope](#2-common-envelope) (`type`, `v`, `id`, `ts`, `payload`); dispatch on `type`, then on `payload.transport` for files. Full handling notes are in the linked section.
+
+### Web → Native — received on `window.Android.postMessage(json)`
+
+| # | `type` | discriminator | fires when | `payload` fields | detail |
+|---|---|---|---|---|---|
+| 1 | `file.ready` | `transport: "url"` | a P&L / ledger / capital-gains report **or** a contract note is generated | `transport`, `url`, `filename`, `mimeType`, `format`, `sizeLabel`, `passwordProtected`, `auth` (`"none"`), `ttlSeconds`, `tokenExpiresAt`, `source` (`report` \| `contract-note`) | [§3.1](#31-transport-url-reports-contract-notes-agent-artifacts) |
+| 2 | `file.ready` | `transport: "inline"` | the **Holdings CSV** is downloaded | `transport`, `filename`, `mimeType` (`text/csv`), `format` (`CSV`), `passwordProtected` (`false`), `auth` (`"none"`), `contentBase64`, `source` (`holdings-csv`) | [§3.3](#33-transport-inline-holdings-csv-only) |
+| 3 | `session.expired` | — | the **first 401** after the FinX session expires | `trigger` (`profile` \| `agent` \| `report` \| `data`) | [§6](#6-sessionexpired--session-lifecycle-cho-231) |
+
+> **Field-shape gotcha:** `transport: "inline"` has **no** `url`, `sizeLabel`, `ttlSeconds`, or `tokenExpiresAt` — those exist only on `transport: "url"`. Read `contentBase64` for inline; read `url` for url.
+>
+> **Not emitted today:** `session.ended` ([§6](#sessionended-sibling--deliberate-close-same-envelope)) is reserved for a future deliberate-close signal — the web app does not send it yet. Ignore-gracefully covers it.
+
+### Native → Web — optional replies via `window.JiniBridge.onNativeEvent(json)`
+
+| `type` | send when | `payload` | detail |
+|---|---|---|---|
+| `file.downloaded` | you finished saving a `file.ready` | `{ status: "success" \| "failed", reason }` — **echo the originating `id`** | [§5](#5-completion-callback-native--web) |
+| `file.expired` | a `url` download 404'd | echo the originating `id` | [§5](#5-completion-callback-native--web) |
+
+Both are optional — files work without them; they only drive the chat card's "Saved / expired" state.
+
+### The complete dispatch (all branches)
+
+```kotlin
+when (msg.getString("type")) {
+    "file.ready" -> when (payload.getString("transport")) {
+        "url"    -> downloadViaDownloadManager(payload)  // GET payload.url, NO auth header
+        "inline" -> saveBase64ToMediaStore(payload)      // decode payload.contentBase64, no network
+    }
+    "session.expired" -> reAuthAndReload(payload)        // payload.trigger is diagnostic only
+    // any other type, or a higher `v` major → ignore gracefully
+}
+```
+
+**Whole surface: 3 inbound event shapes, 2 optional outbound.** Nothing else is emitted.
