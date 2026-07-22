@@ -168,6 +168,9 @@ export interface FlowDescriptor {
   trigger: string
   /** Short sticker label when it should differ from the echoed phrase. */
   stickerLabel?: string
+  /** When true the flow stays registered + keyword-routable, but is NOT shown
+   *  as a home-screen chip (CHO-233: brokerage is reachable by typing only). */
+  hideSticker?: boolean
   /** Composer keyword routing: text matching this starts the flow. */
   keywords: RegExp
   /** Sticker presentation. */

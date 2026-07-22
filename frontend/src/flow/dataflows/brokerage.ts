@@ -69,6 +69,9 @@ const brokerage: DataFlowDescriptor = {
   order: 6, // last sticker — after Pay in / out (5), matching the prototype row
   trigger: 'What is my brokerage?',
   stickerLabel: 'Brokerage',
+  // CHO-233: business wants brokerage off the home chip grid, but the flow
+  // stays reachable by typing (keywords below) and via the rate card.
+  hideSticker: true,
   keywords: /brokerage|my charges|my fees|rate card|slab/i,
   sticker: { icon: TagIcon, tint: 'rose' },
   intro: "Here's what you pay to trade — your brokerage plan.",

@@ -48,6 +48,9 @@ export interface DataFlowDescriptor {
   /** Short sticker label when it should differ from the echoed phrase
    *  (prototype: sticker "Brokerage" vs echo "What is my brokerage?"). */
   stickerLabel?: string
+  /** When true the flow stays registered + keyword-routable, but is NOT shown
+   *  as a home-screen chip (CHO-233: brokerage is reachable by typing only). */
+  hideSticker?: boolean
   /** Composer keyword routing (checked before the file flows). */
   keywords: RegExp
   sticker: { icon: IconComponent; tint: TintKey }
