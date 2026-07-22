@@ -29,24 +29,16 @@ function chipLabel(value: SlotValue): string {
 function SlotRow({
   n,
   label,
-  onEdit,
   children,
-}: Readonly<{ n: number; label: string; onEdit?: () => void; children: ReactNode }>) {
+}: Readonly<{ n: number; label: string; children: ReactNode }>) {
+  // CHO-247: filled slots carry a single edit affordance — the chip itself
+  // (tap-to-edit, with a ✎ glyph). No separate row-header "Edit" button.
   return (
     <div className="border-b border-zinc-100 py-3 first:pt-0.5 last:border-b-0 last:pb-0.5 dark:border-zinc-800">
-      <div className="mb-2 flex items-center justify-between">
+      <div className="mb-2">
         <span className="text-[11px] font-bold tracking-[0.06em] text-zinc-400 uppercase dark:text-zinc-500">
           <span className="text-accent-soft">{n} ·</span> {label.toUpperCase()}
         </span>
-        {onEdit && (
-          <button
-            type="button"
-            onClick={onEdit}
-            className="text-[11px] font-semibold text-accent dark:text-accent-soft"
-          >
-            Edit ✎
-          </button>
-        )}
       </div>
       {children}
     </div>
@@ -276,12 +268,7 @@ export function FlowCard({
     const value = run.values[slot.key]
     if (value !== undefined) {
       rows.push(
-        <SlotRow
-          key={slot.key}
-          n={i + 1}
-          label={slot.label}
-          onEdit={locked ? undefined : () => onEdit(slot.key)}
-        >
+        <SlotRow key={slot.key} n={i + 1} label={slot.label}>
           <FilledChip label={chipLabel(value)} locked={locked} onClick={() => onEdit(slot.key)} />
         </SlotRow>,
       )
