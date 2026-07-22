@@ -80,6 +80,9 @@ export type Message =
     }
   /** A standalone "Change dates"/"Other dates" pill (single-note & empty/error). */
   | { id: string; kind: 'notesAction'; flowMsgId: string; label: string }
+  /** CHO-250: "Try another range" recovery pill on a no-data report result —
+   *  re-opens the range on a fresh seeded flow card. */
+  | { id: string; kind: 'retryRange'; flowKey: string; values: FilledValues }
   /** Actionable help card (options + raise-a-ticket). */
   | { id: string; kind: 'help'; helpKind: HelpKind }
   /** Ticket-confirmation card — always a REAL Freshdesk ticket id (CHO-218). */

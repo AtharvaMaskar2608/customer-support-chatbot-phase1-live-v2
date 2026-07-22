@@ -501,6 +501,19 @@ export function ChatShell({
     append({ id: nextId(), kind: 'flow', run: startRun(descriptor, values) })
   }
 
+  /** CHO-250: re-open the range on a fresh seeded flow card after a no-data
+   *  result — the prior segment/book is kept, the range slot (the date slot,
+   *  or the first slot for financial-year flows) is dropped so the engine
+   *  re-asks it. */
+  function handleTryAnotherRange(flowKey: string, values: FilledValues) {
+    const descriptor = getFlow(flowKey)
+    if (!descriptor) return
+    const rangeSlot = descriptor.slots.find((s) => s.type === 'date') ?? descriptor.slots[0]
+    const seed: FilledValues = { ...values }
+    if (rangeSlot) delete seed[rangeSlot.key]
+    append({ id: nextId(), kind: 'flow', run: startRun(descriptor, seed) })
+  }
+
   function renderResult(
     descriptor: FlowDescriptor,
     values: FlowRun['values'],
@@ -509,6 +522,11 @@ export function ChatShell({
     if (result.kind === 'error') {
       if (result.code === 'AUTH_EXPIRED') handleAuthExpired('report') // CHO-231
       bot(errorLine(result.code))
+      // CHO-250: no-data → an actionable "Try another range" recovery pill
+      // (mirrors contract notes' "Change dates"), re-opening the range.
+      if (result.code === 'NO_DATA') {
+        append({ id: nextId(), kind: 'retryRange', flowKey: descriptor.key, values })
+      }
       return
     }
     if (result.kind === 'email') {
@@ -732,6 +750,7 @@ export function ChatShell({
               onHelp={openHelp}
               onRefreshData={handleRefreshData}
               onAdjustRerun={handleAdjustRerun}
+              onTryAnotherRange={handleTryAnotherRange}
               onResend={handleResend}
               onRaiseTicket={handleRaiseTicket}
               onNoteTap={handleNoteTap}
@@ -766,6 +785,7 @@ function MessageView({
   onHelp,
   onRefreshData,
   onAdjustRerun,
+  onTryAnotherRange,
   onResend,
   onRaiseTicket,
   onNoteTap,
@@ -783,6 +803,7 @@ function MessageView({
   onHelp: (kind: HelpKind) => void
   onRefreshData: (flowKey: string) => void
   onAdjustRerun: (flowKey: string, values: FilledValues) => void
+  onTryAnotherRange: (flowKey: string, values: FilledValues) => void
   onResend: () => void
   onRaiseTicket: () => void
   onNoteTap: (flowMsgId: string, downloadEndpoint: string, note: ClientNote) => void
@@ -875,6 +896,13 @@ function MessageView({
       )
     case 'notesAction':
       return <ChangeDatesButton label={m.label} onClick={() => onChangeDates(m.flowMsgId)} />
+    case 'retryRange':
+      return (
+        <ChangeDatesButton
+          label="Try another range"
+          onClick={() => onTryAnotherRange(m.flowKey, m.values)}
+        />
+      )
     case 'help':
       return <HelpCard helpKind={m.helpKind} onResend={onResend} onRaiseTicket={onRaiseTicket} />
     case 'ticket':
