@@ -7,6 +7,7 @@ error map, and PII-safe logging.
 """
 
 import logging
+from datetime import datetime, timezone
 
 import httpx
 import pytest
@@ -79,6 +80,26 @@ def test_download_returns_token_and_hides_upstream_url(client):
     assert ARTIFACT_URL not in resp.text
     assert "client-report.choiceindia.com" not in resp.text
     assert "fileToken" in payload and payload["fileToken"] != ARTIFACT_URL
+
+
+@respx.mock
+def test_download_envelope_carries_token_expiry(client):
+    """CHO-230: the download envelope carries additive token-expiry fields —
+    `ttlSeconds` mirrors config and `expiresAt` is a wall-clock UTC timestamp
+    roughly `ttl` in the future."""
+    _mock_pnl(_pnl_success(ARTIFACT_URL))
+    _mock_artifact()
+
+    payload = client.post(
+        "/api/report/pnl", headers=HEADERS, json=DOWNLOAD_BODY
+    ).json()
+
+    ttl = config.report_file_ttl_seconds()
+    assert payload["ttlSeconds"] == ttl
+    expires_at = datetime.fromisoformat(payload["expiresAt"])
+    assert expires_at.tzinfo is not None  # timezone-aware UTC timestamp
+    delta = (expires_at - datetime.now(timezone.utc)).total_seconds()
+    assert 0 < delta <= ttl + 5
 
 
 @respx.mock

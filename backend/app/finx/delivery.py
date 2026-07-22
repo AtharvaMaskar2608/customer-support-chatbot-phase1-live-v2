@@ -18,8 +18,11 @@ import re
 import secrets
 import time
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 import httpx
+
+from app import config
 
 logger = logging.getLogger("app.finx.delivery")
 
@@ -55,6 +58,33 @@ def size_label(n_bytes: int) -> str:
     if kb < 1024:
         return f"{round(kb)} KB"
     return f"{kb / 1024:.1f} MB"
+
+
+def download_delivery(file: dict, token: str) -> dict:
+    """Build the normalized download envelope, adding token-expiry fields.
+
+    Every download build site (P&L / Ledger / Tax / Contract Notes) routes
+    through here so the frontend/native bridge learns when the opaque download
+    token stops working. `ttlSeconds` + `expiresAt` are purely additive —
+    existing consumers ignore unknown fields, and no upstream URL is exposed.
+
+    `expiresAt` is a WALL-CLOCK UTC timestamp derived from the same TTL the
+    FileTokenStore uses. It is intentionally NOT the store's internal
+    `expires_at` (that value is `time.monotonic()`-based and is not a real
+    timestamp), so the two can differ by process-scheduling slack; the client
+    treats it as a best-effort hint, not a hard guarantee.
+    """
+    ttl = config.report_file_ttl_seconds()
+    expires_at = (
+        datetime.now(timezone.utc) + timedelta(seconds=ttl)
+    ).isoformat(timespec="seconds")
+    return {
+        "delivery": "download",
+        "file": file,
+        "fileToken": token,
+        "ttlSeconds": ttl,
+        "expiresAt": expires_at,
+    }
 
 
 async def fetch_artifact(

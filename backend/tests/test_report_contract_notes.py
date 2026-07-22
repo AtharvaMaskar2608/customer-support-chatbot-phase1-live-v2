@@ -17,12 +17,14 @@ already includes.
 """
 
 import logging
+from datetime import datetime, timezone
 
 import httpx
 import pytest
 import respx
 from fastapi.testclient import TestClient
 
+from app import config
 from app.main import create_app
 from app.reports import contract_notes
 from app.reports.contract_notes import router as contract_notes_router
@@ -232,6 +234,27 @@ def test_download_returns_token_and_no_password(client):
     assert payload["file"]["name"] == "Contract_Note_16Sep2024.pdf"
     assert payload["file"]["sizeLabel"].endswith(("KB", "B"))
     assert payload["fileToken"]
+
+
+@respx.mock
+def test_download_envelope_carries_token_expiry(client):
+    """CHO-230: additive token-expiry fields on the download envelope."""
+    _mock_list(_list_ok())
+    _mock_download(_pdf_response())
+
+    note_id = _opaque_id_for(client, "Commodity")
+    payload = client.post(
+        "/api/report/contract-notes/download",
+        headers=HEADERS,
+        json={"id": note_id},
+    ).json()
+
+    ttl = config.report_file_ttl_seconds()
+    assert payload["ttlSeconds"] == ttl
+    expires_at = datetime.fromisoformat(payload["expiresAt"])
+    assert expires_at.tzinfo is not None  # timezone-aware UTC timestamp
+    delta = (expires_at - datetime.now(timezone.utc)).total_seconds()
+    assert 0 < delta <= ttl + 5
 
 
 @respx.mock

@@ -37,7 +37,12 @@ from app.agent.ctx import (
 )
 from app.agent.events import record_flow_event
 from app.finx.client import FinxClient, ResultKind
-from app.finx.delivery import fetch_artifact, mask_email, size_label
+from app.finx.delivery import (
+    download_delivery,
+    fetch_artifact,
+    mask_email,
+    size_label,
+)
 from app.finx.routing import Endpoint
 
 logger = logging.getLogger("app.reports.tax")
@@ -174,16 +179,15 @@ async def run_tax(
         content_type=fmt["content_type"],
         session_id=ctx.session_id,
     )
-    return {
-        "delivery": "download",
-        "file": {
+    return download_delivery(
+        {
             "name": filename,
             "sizeLabel": size_label(len(data)),
             "format": params.format,  # "PDF" | "Excel" — the chosen format
             "passwordProtected": False,  # tester-verified: upstream files are not protected (CHO-220)
         },
-        "fileToken": token,
-    }
+        token,
+    )
 
 
 @router.post("/api/report/tax")

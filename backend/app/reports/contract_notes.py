@@ -53,7 +53,7 @@ from app.agent.ctx import (
 )
 from app.agent.events import record_flow_event
 from app.finx.client import ResultKind, map_response
-from app.finx.delivery import size_label
+from app.finx.delivery import download_delivery, size_label
 from app.finx.routing import AuthSource, BodyShape, RouteSpec
 
 logger = logging.getLogger("app.reports.contract_notes")
@@ -415,16 +415,15 @@ async def run_contract_notes_download(
         content_type="application/pdf",
         session_id=ctx.session_id,
     )
-    return {
-        "delivery": "download",
-        "file": {
+    return download_delivery(
+        {
             "name": filename,
             "sizeLabel": size_label(len(resp.content)),
             "format": "PDF",
             "passwordProtected": False,  # contract notes are not PAN-protected
         },
-        "fileToken": token,
-    }
+        token,
+    )
 
 
 # --- routes ------------------------------------------------------------------

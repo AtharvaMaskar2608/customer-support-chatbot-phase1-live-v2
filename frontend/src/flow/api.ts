@@ -28,7 +28,10 @@ export interface FileInfo {
 export type ReportErrorCode = 'AUTH_EXPIRED' | 'NO_DATA' | 'UPSTREAM_ERROR' | 'NETWORK'
 
 export type ReportResult =
-  | { kind: 'download'; file: FileInfo; fileToken: string }
+  // `ttlSeconds`/`expiresAt` (CHO-230) are additive hints for the native
+  // file bridge — how long the opaque download token stays valid. Optional:
+  // older backends and the agent path omit them.
+  | { kind: 'download'; file: FileInfo; fileToken: string; ttlSeconds?: number; expiresAt?: string }
   | { kind: 'email'; emailMasked: string }
   | { kind: 'error'; code: ReportErrorCode }
 
@@ -86,7 +89,13 @@ export async function submitReport(
     return { kind: 'email', emailMasked: data.emailMasked }
   }
   if (data.delivery === 'download' && isFileInfo(data.file) && typeof data.fileToken === 'string') {
-    return { kind: 'download', file: data.file, fileToken: data.fileToken }
+    return {
+      kind: 'download',
+      file: data.file,
+      fileToken: data.fileToken,
+      ttlSeconds: typeof data.ttlSeconds === 'number' ? data.ttlSeconds : undefined,
+      expiresAt: typeof data.expiresAt === 'string' ? data.expiresAt : undefined,
+    }
   }
   return { kind: 'error', code: 'UPSTREAM_ERROR' }
 }

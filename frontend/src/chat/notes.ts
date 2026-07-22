@@ -31,7 +31,9 @@ export type NotesListResult =
   | { kind: 'error'; code: ReportErrorCode }
 
 export type NoteDownloadResult =
-  | { kind: 'download'; file: FileInfo; fileToken: string }
+  // `ttlSeconds`/`expiresAt` (CHO-230): additive token-expiry hints for the
+  // native file bridge; optional, mirroring the report client's envelope.
+  | { kind: 'download'; file: FileInfo; fileToken: string; ttlSeconds?: number; expiresAt?: string }
   | { kind: 'error'; code: ReportErrorCode }
 
 /** Same credential triple as the P&L fetch. Raw JWT — no "Bearer". */
@@ -125,7 +127,13 @@ export async function downloadContractNote(
   if (body === null || typeof body !== 'object') return { kind: 'error', code: 'UPSTREAM_ERROR' }
   const data = body as Record<string, unknown>
   if (data.delivery === 'download' && isFileInfo(data.file) && typeof data.fileToken === 'string') {
-    return { kind: 'download', file: data.file, fileToken: data.fileToken }
+    return {
+      kind: 'download',
+      file: data.file,
+      fileToken: data.fileToken,
+      ttlSeconds: typeof data.ttlSeconds === 'number' ? data.ttlSeconds : undefined,
+      expiresAt: typeof data.expiresAt === 'string' ? data.expiresAt : undefined,
+    }
   }
   return { kind: 'error', code: 'UPSTREAM_ERROR' }
 }

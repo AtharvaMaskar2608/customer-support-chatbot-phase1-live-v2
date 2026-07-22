@@ -42,6 +42,10 @@ export type Message =
       values: FilledValues
       file: FileInfo
       fileToken: string
+      /** Token-expiry hints (CHO-230) threaded to the native file bridge; the
+       *  agent path omits them. */
+      ttlSeconds?: number
+      expiresAt?: string
       passwordNote: string | null
       helpKind: HelpKind
       /** Whether the "Email it" affordance applies (false for contract notes,
