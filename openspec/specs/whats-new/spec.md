@@ -11,21 +11,15 @@ The backend SHALL expose `GET /api/whats-new` returning the current announcement
 - **THEN** it receives `{"version": "<id>", "items": [{"emoji": "📄", "tint": "indigo", "title": "Capital Gain report in Excel", "description": "Ask for FY 25-26 — delivered in-chat, tax-filing ready."}, {"emoji": "🎫", "tint": "green", "title": "Live ticket status", "description": "Type a ticket number to get its current stage, instantly."}]}`
 
 ### Requirement: What's new modal per approved mock
-Tapping the header "✨ What's new" pill SHALL open a card-style modal over the home screen containing: title "✨ What's new in Jini" with a close (✕) button, one row per item (emoji on a rounded tinted tile, bold title, gray description), a full-width purple "Got it" button, and the footer "Content updated remotely — no app release needed". Emoji glyphs match the product's emoji icon language (✨ header, per-item emoji from the payload).
+The modal SHALL render the announcement items from the fetched content as a titled list with tint-matched icon tiles, a close control, and a primary dismiss button. It SHALL NOT claim that content updates reach production without a release, since the content file is baked into the backend image and editing it requires a rebuild and redeploy.
 
-Item icons SHALL be tint-matched per the mock: the glyph renders in the tile's tint colour (blue document on the indigo tile, green ticket on the green tile) rather than in native multi-colour emoji rendering. Unknown tint keys fall back to a neutral tile with the emoji as-is.
+#### Scenario: Modal lists the fetched items
+- **WHEN** the customer opens the What's New modal
+- **THEN** each item renders with its icon tile, title, and description, above a single dismiss button
 
-#### Scenario: Open and render
-- **WHEN** the user taps the "What's new" pill
-- **THEN** the modal opens showing the fetched items in order with their emoji tiles, and the home screen remains visible behind it
-
-#### Scenario: Tint-matched icon rendering
-- **WHEN** an item with tint "green" and a ticket glyph renders
-- **THEN** the icon appears in green tones on the green tile (mock-faithful), not in the emoji's native colours
-
-#### Scenario: Dismissal
-- **WHEN** the user taps "Got it" or ✕
-- **THEN** the modal closes and the home screen is unchanged
+#### Scenario: No remote-content claim
+- **WHEN** the modal renders
+- **THEN** no footer text asserts that content is updated remotely or that no app release is needed
 
 ### Requirement: Unseen indicator driven by content version
 The "What's new" pill SHALL show a small red notification dot when the current content `version` has not been dismissed on this device. Dismissing the modal (Got it or ✕) SHALL persist the seen version locally so the dot stays hidden until the backend publishes a newer version.
@@ -56,4 +50,26 @@ The "What's new" pill SHALL be shown only while the widget is on the home screen
 #### Scenario: Reset failure degrades safely
 - **WHEN** `POST /api/chat/reset` fails or times out
 - **THEN** the UI still resets to the home screen and the next message simply continues the previous agent thread
+
+### Requirement: Every shipped item's emoji has a mapped glyph
+Icon tiles SHALL render a tinted inline SVG glyph whose colour matches its tile. The emoji-to-glyph map exists because native emoji rendering breaks the two-tone tile design. Content shipped in `whats_new.json` MUST therefore use only emoji that are present in the map; the neutral-tile fallback remains for forward compatibility with content published later, but is not an acceptable state for shipped content.
+
+#### Scenario: Shipped content never falls back to the neutral tile
+- **WHEN** the modal renders the published announcement items
+- **THEN** every tile shows a tinted SVG glyph, and none shows a raw colour emoji on a grey tile
+
+#### Scenario: Unknown emoji still degrades safely
+- **WHEN** content published later carries an emoji with no mapped glyph
+- **THEN** that row renders the raw emoji on a neutral tile rather than failing to render
+
+### Requirement: Content changes require a version bump
+Any change to the announcement items SHALL be accompanied by a change to the `version` field. The unseen indicator is driven by comparing the fetched version against the locally persisted seen version, so unchanged versions leave previously-dismissed customers with no signal that the content changed.
+
+#### Scenario: New copy reaches customers who already dismissed the previous version
+- **WHEN** the items change and the version is bumped
+- **THEN** a customer who dismissed the prior version sees the unseen dot again
+
+#### Scenario: Unbumped content is invisible
+- **WHEN** the items change but the version does not
+- **THEN** previously-dismissed customers see no dot — this is the failure the requirement exists to prevent
 

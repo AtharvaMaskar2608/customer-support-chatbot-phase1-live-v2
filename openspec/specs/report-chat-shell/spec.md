@@ -42,7 +42,7 @@ A composer SHALL remain pinned and usable at every point, including after a flow
 - **THEN** the shell routes the same text by keyword to a matching flow, or replies with the available report and data actions if unmatched
 
 ### Requirement: Narrated generation
-While a report is being produced, the shell SHALL show a sequence of short progress captions specific to the flow (e.g. "Pulling your trades… → Tallying charges… → Sealing with your PAN…") rather than a generic spinner.
+While a report is being produced, the shell SHALL show a sequence of short progress captions specific to the flow (e.g. "Pulling your trades… → Tallying charges… → Packaging your report…") rather than a generic spinner. Captions SHALL NOT claim password protection.
 
 #### Scenario: Narrated wait
 - **WHEN** a report is generating
@@ -85,7 +85,7 @@ The empty state SHALL include stickers for the three data flows — "My holdings
 - **THEN** the empty state collapses and the holdings flow runs inline
 
 ### Requirement: Deterministic captions for agent artifacts
-The shell SHALL render the connective copy beside agent artifacts itself, from fixed code/flow-descriptor copy — never expecting narration text from the model. A `flow` artifact SHALL be preceded by a short handoff line (the flow's own intro when the seed is empty, a fixed "fill in the rest" line when seeded); a `file` artifact SHALL be accompanied by a fixed report-ready line (the password note stays on the card); a `data` artifact SHALL render the card and its existing follow-up affordance with no extra line. Caption copy SHALL be byte-stable and MAY reference layout (it is rendered in place), which model text never may.
+The shell SHALL render the connective copy beside agent artifacts itself, from fixed code/flow-descriptor copy — never expecting narration text from the model. A `flow` artifact SHALL be preceded by a short handoff line (the flow's own intro when the seed is empty, a fixed "fill in the rest" line when seeded); a `file` artifact SHALL be accompanied by a fixed report-ready line; a `data` artifact SHALL render the card and its existing follow-up affordance with no extra line. Caption copy SHALL be byte-stable and MAY reference layout (it is rendered in place), which model text never may.
 
 #### Scenario: Seeded form gets a deterministic handoff line
 - **WHEN** a `flow` artifact with a non-empty seed renders
