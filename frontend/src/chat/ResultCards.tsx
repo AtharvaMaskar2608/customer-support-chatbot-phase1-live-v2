@@ -203,13 +203,13 @@ export function TicketCard({ ticketId }: Readonly<{ ticketId: string }>) {
             Ticket #{ticketId} raised
           </p>
           <p className="mt-0.5 text-[11.5px] text-zinc-400 dark:text-zinc-500">
-            Status: Open · we'll email you updates
+            We'll email you updates
           </p>
         </div>
       </div>
       <p className="mt-3 text-xs text-zinc-400 dark:text-zinc-500">
-        Usually resolved within 24 hours — you can check progress anytime by asking "my ticket
-        status".
+        We're on it — updates will reach your registered email. ✨ Coming soon: ask me
+        "my ticket status" to track it right here.
       </p>
     </div>
   )
