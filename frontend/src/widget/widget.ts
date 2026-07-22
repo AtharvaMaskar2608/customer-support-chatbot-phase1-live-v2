@@ -165,7 +165,7 @@ export function init(options: ChoiceJiniInitOptions = {}): void {
   const bubble = document.createElement('button')
   bubble.type = 'button'
   bubble.className = 'bubble'
-  bubble.setAttribute('aria-label', 'Open Choice Jini support chat')
+  bubble.setAttribute('aria-label', 'Open AskFinX support chat')
   bubble.setAttribute('aria-expanded', 'false')
   bubble.innerHTML = `
     <svg class="icon icon-sparkle" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="${SPARKLE_PATH}"/></svg>
@@ -178,7 +178,7 @@ export function init(options: ChoiceJiniInitOptions = {}): void {
     if (iframe !== null) return
     iframe = document.createElement('iframe')
     iframe.className = 'frame'
-    iframe.title = 'Choice Jini support chat'
+    iframe.title = 'AskFinX support chat'
     iframe.src = chatSrc.href
     panel.appendChild(iframe)
   }
