@@ -4,7 +4,7 @@
 TBD - created by archiving change cho-208-210-report-flows. Update Purpose after archive.
 ## Requirements
 ### Requirement: Capital Gains flow steps
-The Capital Gains flow SHALL collect, one at a time: **financial year** (dynamically the current Indian FY plus the previous two, never hardcoded), **format** (PDF or Excel — the only flow with a format step), and **delivery** (download or email). The delivered report is PAN-password-protected.
+The Capital Gains flow SHALL collect, one at a time: **financial year** (dynamically the current Indian FY plus the previous two, never hardcoded), **format** (PDF or Excel — the only flow with a format step), and **delivery** (download or email). No password-protection claim is made about the delivered report.
 
 #### Scenario: Full Capital Gains flow
 - **WHEN** the user starts Capital Gains from the sticker

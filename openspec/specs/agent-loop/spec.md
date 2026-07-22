@@ -4,7 +4,7 @@
 TBD - created by archiving change cho-213-agentic-loop. Update Purpose after archive.
 ## Requirements
 ### Requirement: Tool-use orchestration loop
-The backend SHALL expose `POST /api/chat` which appends the user's free-text message to the session's conversation and runs a tool-use loop against the Anthropic Messages API: while the response's `stop_reason` is `tool_use`, every `tool_use` block in that response SHALL be executed, the assistant message SHALL be appended wire-faithfully (content blocks unmodified), and all corresponding `tool_result` blocks SHALL be returned in a single user-role message. After executing a round, the loop SHALL end the turn WITHOUT a continuation model call when every call in the round succeeded, every successful call emitted an artifact event (form handover, data card, or file card), and at least one artifact was emitted — the artifact is the answer; connective copy is the frontend's job and post-artifact narration is structurally prevented. In every other case (any errored call, any successful non-artifact call such as KB search or a contract-note list, or a mixed round) the model SHALL be called again as before. The loop otherwise ends when `stop_reason` is `end_turn` or when the configurable inner-round guard (default 5) is reached. The system prompt SHALL instruct the model to call artifact-producing tools immediately with no preamble text, to never use spatial UI language ("above"/"below" — the model cannot know layout), and to never restate data an artifact already shows.
+The backend SHALL expose `POST /api/chat` which appends the user's free-text message to the session's conversation and runs a tool-use loop against the Anthropic Messages API: while the response's `stop_reason` is `tool_use`, every `tool_use` block in that response SHALL be executed, the assistant message SHALL be appended wire-faithfully (content blocks unmodified), and all corresponding `tool_result` blocks SHALL be returned in a single user-role message. After executing a round, the loop SHALL end the turn WITHOUT a continuation model call when every call in the round succeeded, every successful call emitted an artifact event (form handover, data card, or file card), and at least one artifact was emitted — the artifact is the answer; connective copy is the frontend's job and post-artifact narration is structurally prevented. When any call in the round surfaces `AUTH_EXPIRED`, the loop SHALL instead end the turn immediately by emitting the terminal `AUTH_EXPIRED` error event with NO continuation model call — auth expiry is a deterministic, security-sensitive state the model never narrates (the auth-expired `tool_result` is still recorded for byte-faithful replay; the frontend shows fixed session-expired copy and signals the host). In every other case (any errored call that is not auth expiry, any successful non-artifact call such as KB search or a contract-note list, or a mixed round) the model SHALL be called again as before. The loop otherwise ends when `stop_reason` is `end_turn` or when the configurable inner-round guard (default 5) is reached. The system prompt SHALL instruct the model to call artifact-producing tools immediately with no preamble text, to never use spatial UI language ("above"/"below" — the model cannot know layout), and to never restate data an artifact already shows.
 
 #### Scenario: Artifact-only round ends the turn silently
 - **WHEN** the model's round contains a single successful `open_report_form` (or `get_brokerage_rates`) call
@@ -14,9 +14,13 @@ The backend SHALL expose `POST /api/chat` which appends the user's free-text mes
 - **WHEN** the model's round contains a successful `search_knowledge_base` call
 - **THEN** the loop calls the model again and the answer streams as text, exactly as before
 
-#### Scenario: Errored round still narrates
-- **WHEN** a tool call in the round returns `is_error: true`
-- **THEN** the loop calls the model again so it can explain the failure (including the AUTH_EXPIRED narrate-then-error path)
+#### Scenario: Non-auth errored round still narrates
+- **WHEN** a tool call in the round returns `is_error: true` for a non-auth failure (`NO_DATA` or `UPSTREAM_ERROR`)
+- **THEN** the loop calls the model again so it can explain the failure to the user in plain language
+
+#### Scenario: Auth expiry short-circuits without narration
+- **WHEN** a tool call in the round returns the `AUTH_EXPIRED` error result
+- **THEN** the loop emits the terminal `AUTH_EXPIRED` error event immediately, makes no further model call, and generates no narration text
 
 #### Scenario: Mixed round still narrates
 - **WHEN** one round contains a successful data-card call AND a successful KB search in parallel
@@ -53,7 +57,7 @@ Tool input schemas SHALL contain only user-intent parameters. Credentials (SSO J
 - **THEN** the response is HTTP 400 `{"error": "MISSING_CREDENTIALS"}` and no model call is made
 
 ### Requirement: Slot filling without invention
-The system prompt SHALL instruct the model to never invent values for required tool parameters and SHALL include today's date so relative date expressions resolve to `YYYY-MM-DD`. For the four report flows (P&L, ledger, capital gains, contract notes) the model SHALL NOT ask for parameters in prose: when any parameter is missing it SHALL call `open_report_form` carrying only the values the user actually stated (none stated ⇒ flow key alone), and when every parameter including the delivery method is explicitly known — from the user's words or from a prior flow event in the thread — it SHALL call the report tool directly. Prose clarifying questions (all missing values bundled into one question) remain only for non-report tools.
+The system prompt SHALL instruct the model to never invent values for required tool parameters and SHALL include the current date **resolved in IST (`Asia/Kolkata`)** so relative date expressions resolve to `YYYY-MM-DD`. The date MUST be computed from an explicitly named zone, never inherited from the host or container timezone, and the report-form validator MUST resolve "today" on the same clock so the prompt and the validator can never disagree. For the four report flows (P&L, ledger, capital gains, contract notes) the model SHALL NOT ask for parameters in prose: when any parameter is missing it SHALL call `open_report_form` carrying only the values the user actually stated (none stated ⇒ flow key alone), and when every parameter including the delivery method is explicitly known — from the user's words or from a prior flow event in the thread — it SHALL call the report tool directly. Prose clarifying questions (all missing values bundled into one question) remain only for non-report tools.
 
 #### Scenario: Nothing mentioned loads the full form
 - **WHEN** the user writes "get my P&L" with no parameters
@@ -67,13 +71,9 @@ The system prompt SHALL instruct the model to never invent values for required t
 - **WHEN** the user writes "Get my F&O P&L for 1 to 30 June 2026, download it here"
 - **THEN** the model calls the P&L report tool directly and the file card is produced with no form
 
-#### Scenario: Relative dates resolve before seeding
-- **WHEN** the user writes "equity P&L for last month"
-- **THEN** the `open_report_form` call carries the concrete `YYYY-MM-DD` range for the previous calendar month
-
-#### Scenario: Follow-up reuses flow-event context
-- **WHEN** a flow event records a completed June Equity P&L download and the user writes "now the same for F&O"
-- **THEN** the model calls `open_report_form` seeded with segment F&O and the June date range, landing the user on the delivery step
+#### Scenario: Date is IST regardless of host timezone
+- **WHEN** the backend process runs with `TZ=UTC` at 01:00 IST on 21 July 2026
+- **THEN** the prompt states the date as 2026-07-21, not 2026-07-20
 
 ### Requirement: Conversation caps and escalation suggestion
 The loop SHALL enforce, in code and independent of model behavior, three env-configurable caps evaluated per incoming user message: (1) at most `CLARIFY_CAP` (default 2) clarifying questions per task window; (2) at most `TASK_TURN_CAP` (default **100**) user turns per task window; (3) at most `SESSION_TURN_CAP` (default **100**) user turns per session — defaults sized for the ~8-hour life of a widget session thread. A task window is the span of conversation since the last resolution event — an assistant turn that completed with at least one successful (`is_error: false`) tool call, which includes a successful `open_report_form` call — and a resolution event SHALL reset the per-task counters. Escalation injection SHALL be trip-specific: a clarify-cap or task-turn trip SHALL instruct the model to stop asking and offer escalation to a human; a session-backstop trip alone SHALL instruct the model to offer a human only if the user appears stuck or unsatisfied, and otherwise answer normally.
@@ -141,4 +141,75 @@ The backend SHALL expose `POST /api/chat/reset`, authenticated by the same heade
 #### Scenario: Missing credentials
 - **WHEN** `/api/chat/reset` is called without the auth headers
 - **THEN** the response is HTTP 400 `{"error": "MISSING_CREDENTIALS"}` and no thread is touched
+
+### Requirement: Concise, non-refusing knowledge answers
+Knowledge-base narration SHALL lead with the direct answer in one to three short sentences, adding detail only when the user asks for it — no headers, lists, or preambles unless steps are requested. The system prompt SHALL enumerate the knowledge base's actual topic catalog so the model knows what it covers, and SHALL direct that process/how-to questions — including account closure/deletion — are ALWAYS answered from the knowledge base: the assistant never refuses a how-to as an action it cannot perform. For account actions outside its capabilities it SHALL explain the process and offer to raise a support ticket.
+
+#### Scenario: Account deletion is answered, not refused
+- **WHEN** the user asks "how do I delete my account?"
+- **THEN** the reply explains the closure process from the knowledge base (and may offer a ticket) — it does not respond that it cannot help with that
+
+#### Scenario: KB answer is brief
+- **WHEN** the user asks "what are AMC charges?"
+- **THEN** the reply is a few short sentences leading with the amount/definition, not a multi-section explainer
+
+### Requirement: The prompt carries a live IST status line
+The primed turn SHALL end with a status line stating the current IST time, weekday, and date, together with the market state and — when the market is open — the session's close time. This replaces the date-only line, so the model can answer wall-clock questions such as whether a same-day cutoff has passed, rather than only resolving relative dates.
+
+#### Scenario: Open market with a close time
+- **WHEN** a request is made at 14:47 IST on an ordinary trading Monday
+- **THEN** the prompt states the current IST time and date, that markets are open, and when the session closes
+
+#### Scenario: Holiday state is explicit
+- **WHEN** a request is made on a weekday exchange holiday
+- **THEN** the prompt states that the market is closed for a holiday, rather than implying an ordinary closed session
+
+#### Scenario: Cutoff question is answerable
+- **WHEN** a customer asks at 15:20 IST whether they can still act before the session ends
+- **THEN** the model has the clock and the close time available in its prompt and can answer without guessing
+
+### Requirement: The live status line is the last content block of the primed turn
+The primed user turn SHALL be composed of at least two content blocks: the frozen instructions and few-shot examples first, carrying the prompt-cache breakpoint, and the live status line last. No volatile value may appear before a cache breakpoint.
+
+#### Scenario: Frozen prefix stays byte-stable across requests
+- **WHEN** two requests are made minutes apart on the same day
+- **THEN** every content block up to and including the cache breakpoint is byte-identical between them, and only the final block differs
+
+#### Scenario: Recorded prompt snapshot stays time-stable
+- **WHEN** the prompt snapshot is recorded for hashing
+- **THEN** it contains the status line's placeholders rather than a rendered time, so the hash does not change from one minute to the next
+
+### Requirement: Tax and capital-gains figures are report-only
+The system prompt SHALL forbid the model from computing tax or capital-gains figures, classifying a specific lot's holding period into short- vs long-term for a figure, or stating any tax rate or exemption threshold from general knowledge. Any question involving such figures or rates SHALL route to the capital gains report (via `open_report_form` for tax, or `get_capital_gains_report` when every parameter is known), which is the authoritative statement. This mirrors the brokerage grounding rule: the authoritative source answers, never the model's memory. The model MAY explain the concept in plain terms without producing a figure or a rate.
+
+#### Scenario: User asks for a computed tax figure
+- **WHEN** the user provides lot data or asks how much tax they will owe on a sale
+- **THEN** the model does not compute a gain, does not apply FIFO/LIFO, does not classify the holding period into a figure, and does not state a tax rate; it explains that the figure comes from the official capital gains statement and offers to open the capital gains report
+
+#### Scenario: No tax rate is ever quoted
+- **WHEN** any reply touches capital-gains tax
+- **THEN** it contains no tax rate or exemption threshold (e.g. no "10%", no "12.5%", no "₹1 lakh" / "₹1.25 lakh" exemption) — these change with tax law and are not in the system's ground truth
+
+#### Scenario: Concept explanation without figures is allowed
+- **WHEN** the user asks what capital gains are or how holding period affects them
+- **THEN** the model may explain the concept in plain terms (that gains are computed on sale, that holding period determines short- vs long-term treatment) without producing any specific figure or rate, and offers the report for actual numbers
+
+### Requirement: Report columns are registry-grounded
+The agent SHALL answer any question about what a report contains, what a column or field means, or how to read a report ONLY from the column registry via the `get_report_columns` tool — using each label verbatim and the registry's locked gloss for its meaning. It SHALL NOT enumerate, rename, or invent report columns from general knowledge or the knowledge base. The registry is server-side config (`backend/content/column_registry.json`, remote-updatable, no client data) covering the P&L, tax, ledger, contract-note, and holdings reports. When a field name is ambiguous across reports (returned by the tool as `ambiguousLabels`), the agent SHALL ask which report the user means. When a report is not in the registry, the agent SHALL NOT list columns — it offers to pull the report instead.
+
+#### Scenario: P&L columns are grounded, not invented
+- **WHEN** the user asks what their P&L report contains
+- **THEN** the agent calls `get_report_columns` for `pnl` and describes only the registry's columns (Security, Open, Buy, Sell, Net Qty, CL. Price, Realized P&L, Unrealized P&L) with their locked glosses — never "Short-term / Long-term / Trading P&L / Charges", which are not in the P&L report
+
+#### Scenario: field meaning comes from the locked gloss
+- **WHEN** the user asks what a specific column means (e.g. "what is Derv Comm")
+- **THEN** the agent answers from the registry's gloss ("derivative and commodity income") without guessing or renaming the label
+
+#### Scenario: ambiguous field asks which report
+- **WHEN** the user asks about a field that appears in more than one report (e.g. Net Qty)
+- **THEN** the agent asks which report they mean before explaining it
+
+#### Scenario: uncovered surface is not enumerated
+- **WHEN** the user asks to explain the columns of something not in the registry
+- **THEN** the agent does not list columns and offers to pull the relevant report instead
 

@@ -18,9 +18,9 @@ The backend SHALL call `GetLedgerDetailsPDF` with the session client code as `Cl
 - **THEN** the upstream body carries `Margin: 1` (Normal → `Margin: 0`)
 
 ### Requirement: Ledger result
-A downloaded Ledger SHALL present as a PAN-password-protected PDF file card via the shared delivery layer; email SHALL return a masked confirmation.
+A downloaded Ledger SHALL present as a PDF file card via the shared delivery layer (no password-protection claim — delivered PDFs are not password-protected); email SHALL return a masked confirmation.
 
 #### Scenario: Download result
 - **WHEN** the Ledger PDF is delivered
-- **THEN** a file card shows the filename and "PDF · password: PAN"
+- **THEN** a file card shows the filename and "PDF" with no password note
 

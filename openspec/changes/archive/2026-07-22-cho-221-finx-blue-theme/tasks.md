@@ -23,6 +23,6 @@
 
 ## 5. Ship & sync
 
-- [ ] 5.1 Ship via git-sync: branch `cho-221-finx-blue-theme`, commit `CHO-221: ...`, push, PR with `Fixes CHO-221`
-- [ ] 5.2 linear-connector: move CHO-221 through In Progress → In Review with a summary comment
-- [ ] 5.3 Deploy per the repo's CHO-219 Docker process once the PR lands
+- [x] 5.1 Ship via git-sync: branch `cho-221-finx-blue-theme`, commit `CHO-221: ...`, push, PR with `Fixes CHO-221`
+- [x] 5.2 linear-connector: move CHO-221 through In Progress → In Review with a summary comment
+- [x] 5.3 Deploy per the repo's CHO-219 Docker process once the PR lands
