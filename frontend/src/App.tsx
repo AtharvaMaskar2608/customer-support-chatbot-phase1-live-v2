@@ -1,6 +1,8 @@
 import { useState } from 'react'
-import { BackIcon, SparkleIcon } from './icons'
-import { postCloseToHost } from './embed'
+// CHO-229: used only by the parked Header — restore alongside it.
+// import { BackIcon, SparkleIcon } from './icons'
+// CHO-229: used only by the parked Header — restore alongside it.
+// import { postCloseToHost } from './embed'
 import { getSessionContext, hasCredentials } from './session'
 import { useGreeting } from './useGreeting'
 import { useWhatsNew } from './useWhatsNew'
@@ -8,6 +10,8 @@ import { WhatsNewModal } from './WhatsNewModal'
 import { authHeaders } from './chat/agent'
 import { ChatShell } from './chat/ChatShell'
 
+// ===== CHO-229 — HEADER PARKED (do not delete) — replaced by FloatingControls =====
+/*
 function Header({
   userId,
   engaged,
@@ -17,7 +21,7 @@ function Header({
   onBack,
 }: Readonly<{
   userId: string | null
-  /** Conversation running → the pill slot shows Restart instead (CHO-216). */
+  // Conversation running → the pill slot shows Restart instead (CHO-216).
   engaged: boolean
   whatsNewDot: boolean
   onWhatsNew: () => void
@@ -85,11 +89,62 @@ function Header({
     </header>
   )
 }
+*/
+// ===== end HEADER PARKED =====
+
+// CHO-229: the header's two functional controls relocated to a small floating
+// cluster at the top-right of the widget surface. Same dual-purpose pill as the
+// parked header (idle → What's new, engaged → Restart), plus shadow-md for
+// legibility over conversation content.
+function FloatingControls({
+  engaged,
+  whatsNewDot,
+  onWhatsNew,
+  onRestart,
+}: Readonly<{
+  /** Conversation running → the pill slot shows Restart instead (CHO-216). */
+  engaged: boolean
+  whatsNewDot: boolean
+  onWhatsNew: () => void
+  onRestart: () => void
+}>) {
+  return (
+    <div className="absolute top-3 right-3 z-20">
+      {engaged ? (
+        // Same pill slot: once a conversation kicks off, Restart takes over.
+        // No unseen dot here — that belongs to What's New only.
+        <button
+          type="button"
+          onClick={onRestart}
+          className="relative shrink-0 rounded-full bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white shadow-md dark:bg-zinc-100 dark:text-zinc-900"
+        >
+          <span>↻ Restart</span>
+        </button>
+      ) : (
+        <button
+          type="button"
+          aria-haspopup="dialog"
+          onClick={onWhatsNew}
+          className="relative shrink-0 rounded-full bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white shadow-md dark:bg-zinc-100 dark:text-zinc-900"
+        >
+          <span>✨ What's new</span>
+          {whatsNewDot && (
+            <span
+              aria-hidden="true"
+              className="absolute -top-px -right-px size-2 rounded-full bg-alert ring-2 ring-white dark:ring-zinc-900"
+            />
+          )}
+        </button>
+      )}
+    </div>
+  )
+}
 
 export default function App() {
   const session = getSessionContext()
   const firstName = useGreeting(session)
-  const userId = hasCredentials(session) ? session.userId : null
+  // CHO-229: used only by the parked Header — restore alongside it.
+  // const userId = hasCredentials(session) ? session.userId : null
 
   const whatsNew = useWhatsNew()
   const [whatsNewOpen, setWhatsNewOpen] = useState(false)
@@ -123,9 +178,8 @@ export default function App() {
     // webview (app) owns the card chrome. A bounded flex column so the
     // conversation scrolls between a pinned header and a pinned composer.
     <div className="h-dvh bg-white font-sans antialiased dark:bg-zinc-900">
-      <main className="mx-auto flex h-dvh w-full max-w-[480px] flex-col">
-        <Header
-          userId={userId}
+      <main className="relative mx-auto flex h-dvh w-full max-w-[480px] flex-col">
+        <FloatingControls
           engaged={engaged}
           whatsNewDot={whatsNew.hasUnseen}
           onWhatsNew={() => {
@@ -133,9 +187,6 @@ export default function App() {
             if (whatsNew.items !== null) setWhatsNewOpen(true)
           }}
           onRestart={handleRestart}
-          // Inside the website's corner panel the back arrow closes the
-          // panel; on app webviews the host owns navigation (no-op).
-          onBack={session.platform === 'web' ? postCloseToHost : undefined}
         />
 
         <ChatShell
