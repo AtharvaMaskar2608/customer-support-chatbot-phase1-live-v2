@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUpIcon } from '../icons'
+import { ArrowUpIcon, RefreshIcon } from '../icons'
 import { hasCredentials, type SessionContext } from '../session'
 import { getFlow, matchFlow } from '../flow/registry'
 import { getDataFlow, matchDataFlow } from '../flow/dataRegistry'
@@ -490,6 +490,17 @@ export function ChatShell({
     if (descriptor) void generateData(descriptor)
   }
 
+  /** CHO-249: spawn a FRESH seeded flow card below a delivered report so the
+   *  user can adjust the inputs and run it again — the delivered card stays as
+   *  history (spawn-fresh-below). Guided-flow reports only (agent file
+   *  artifacts carry no slot values to seed). */
+  function handleAdjustRerun(flowKey: string, values: FilledValues) {
+    const descriptor = getFlow(flowKey)
+    if (!descriptor) return
+    bot('Sure — tweak anything and send it again.')
+    append({ id: nextId(), kind: 'flow', run: startRun(descriptor, values) })
+  }
+
   function renderResult(
     descriptor: FlowDescriptor,
     values: FlowRun['values'],
@@ -504,6 +515,8 @@ export function ChatShell({
       append({
         id: nextId(),
         kind: 'email',
+        flowKey: descriptor.key,
+        values,
         noun: descriptor.result.emailNoun(values),
         emailMasked: result.emailMasked,
       })
@@ -718,6 +731,7 @@ export function ChatShell({
               onEmailIt={handleEmailIt}
               onHelp={openHelp}
               onRefreshData={handleRefreshData}
+              onAdjustRerun={handleAdjustRerun}
               onResend={handleResend}
               onRaiseTicket={handleRaiseTicket}
               onNoteTap={handleNoteTap}
@@ -751,6 +765,7 @@ function MessageView({
   onEmailIt,
   onHelp,
   onRefreshData,
+  onAdjustRerun,
   onResend,
   onRaiseTicket,
   onNoteTap,
@@ -767,6 +782,7 @@ function MessageView({
   onEmailIt: (flowKey: string, values: FlowRun['values']) => void
   onHelp: (kind: HelpKind) => void
   onRefreshData: (flowKey: string) => void
+  onAdjustRerun: (flowKey: string, values: FilledValues) => void
   onResend: () => void
   onRaiseTicket: () => void
   onNoteTap: (flowMsgId: string, downloadEndpoint: string, note: ClientNote) => void
@@ -833,6 +849,9 @@ function MessageView({
             onEmailIt={() => onEmailIt(m.flowKey, m.values)}
             onHelp={() => onHelp(m.helpKind)}
           />
+          {Object.keys(m.values).length > 0 && (
+            <AdjustRerunButton onClick={() => onAdjustRerun(m.flowKey, m.values)} />
+          )}
           <FeedbackChip rating={m.feedback} onRate={(rating) => onRate(m.id, rating)} />
         </div>
       )
@@ -840,6 +859,9 @@ function MessageView({
       return (
         <div className="flex flex-col gap-1.5">
           <EmailCard noun={m.noun} emailMasked={m.emailMasked} onHelp={() => onHelp('email')} />
+          {Object.keys(m.values).length > 0 && (
+            <AdjustRerunButton onClick={() => onAdjustRerun(m.flowKey, m.values)} />
+          )}
           <FeedbackChip rating={m.feedback} onRate={(rating) => onRate(m.id, rating)} />
         </div>
       )
@@ -893,6 +915,20 @@ function MessageView({
 }
 
 /* ── pinned composer ──────────────────────────────────────────────────── */
+
+/** CHO-249: "Adjust & run again" pill under a delivered report — spawns a
+ *  fresh seeded flow card below to tweak inputs and re-deliver. */
+function AdjustRerunButton({ onClick }: Readonly<{ onClick: () => void }>) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex w-fit items-center gap-1.5 rounded-full border-[1.5px] border-zinc-200 bg-white px-3.5 py-1.5 text-[13px] font-semibold text-accent transition-colors hover:border-accent-soft hover:bg-accent-tint dark:border-zinc-700 dark:bg-zinc-900 dark:text-accent-soft dark:hover:bg-accent/15"
+    >
+      <RefreshIcon className="size-4" /> Adjust &amp; run again
+    </button>
+  )
+}
 
 function Composer({
   onSubmit,

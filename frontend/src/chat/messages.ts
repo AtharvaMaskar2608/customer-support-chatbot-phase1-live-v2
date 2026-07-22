@@ -61,6 +61,9 @@ export type Message =
   | {
       id: string
       kind: 'email'
+      /** flowKey + values let "Adjust & run again" re-seed a fresh flow (CHO-249). */
+      flowKey: string
+      values: FilledValues
       noun: string
       emailMasked: string
       anchorSeq?: number
