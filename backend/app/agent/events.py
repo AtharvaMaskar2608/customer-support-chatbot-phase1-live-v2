@@ -1,8 +1,9 @@
 """Flow events — widget completions bridged into agent memory (CHO-214 · D4/D5).
 
-When a deterministic report endpoint succeeds, it records a `flow_event`
-turn on the session's thread so the agent remembers what the widget did
-("now the same for F&O" works). The write is fire-and-forget: memo built
+When a deterministic report endpoint resolves — a success, or a no-data
+result (CHO-253) — it records a `flow_event` turn on the session's thread so
+the agent remembers what the widget did ("now the same for F&O" works) and
+knows when a prior attempt came back empty. The write is fire-and-forget: memo built
 synchronously (deterministic), thread lookup + enqueue in a background task
 that swallows every failure — the report response is never delayed and never
 fails because of memory.
@@ -71,6 +72,18 @@ def render_memo(flow: str, details: list[str], delivery: str) -> str:
     )
 
 
+def render_no_data_memo(flow: str, details: list[str]) -> str:
+    """The no-data app-event memo (CHO-253): the user completed the form but
+    the report came back empty for that selection — so the model's next reply
+    can reason about the miss instead of being blind to it."""
+    name = _FLOW_NAMES.get(flow, flow)
+    filled = f": {', '.join(details)}" if details else ""
+    return (
+        f"{_FRAME} The user requested the {name} report in the "
+        f"widget{filled} — no records were found for that selection."
+    )
+
+
 def record_flow_event(
     app: Any,
     *,
@@ -80,19 +93,27 @@ def record_flow_event(
     details: list[str],
     slots: dict[str, Any],
     delivery: str,
+    outcome: str = "success",
 ) -> None:
     """Fire-and-forget: enqueue the flow_event turn on the session's thread.
     Safe to call from any route — no store, no running loop, or any failure
-    just skips the event (length-only logging)."""
+    just skips the event (length-only logging).
+
+    `outcome` is "success" for a delivered report or "no_data" when the report
+    came back empty (CHO-253); the memo and meta reflect which."""
     store = getattr(getattr(app, "state", None), "conversation_store", None)
     if store is None:
         return
-    memo = render_memo(flow, details, delivery)
+    memo = (
+        render_memo(flow, details, delivery)
+        if outcome == "success"
+        else render_no_data_memo(flow, details)
+    )
     meta = {
         "flow": flow,
         "slots": slots,
         "delivery": delivery,
-        "outcome": "success",
+        "outcome": outcome,
     }
 
     async def _record() -> None:

@@ -28,6 +28,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from app.agent.ctx import (
+    CODE_NO_DATA,
     CODE_UPSTREAM_ERROR,
     ToolCtx,
     ToolError,
@@ -210,6 +211,18 @@ async def tax_report(
     )
     result = await run_tax(body, ctx)
     if isinstance(result, ToolError):
+        # No-data attempt → agent memory (CHO-253): fire-and-forget, like success.
+        if result.code == CODE_NO_DATA:
+            record_flow_event(
+                request.app,
+                session_id=x_session_id,
+                client_code=x_user_id,
+                flow="tax",
+                details=[f"FY {body.finYear}", body.format],
+                slots={"finYear": body.finYear, "format": body.format},
+                delivery=body.delivery,
+                outcome="no_data",
+            )
         return error_json_response(result)
     # Widget completion → agent memory (CHO-214): fire-and-forget.
     record_flow_event(
