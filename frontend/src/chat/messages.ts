@@ -46,6 +46,8 @@ export type Message =
        *  agent path omits them. */
       ttlSeconds?: number
       expiresAt?: string
+      /** Bridge bookkeeping hint (CHO-230): which report family produced the file. */
+      source?: 'report' | 'contract-note'
       passwordNote: string | null
       helpKind: HelpKind
       /** Whether the "Email it" affordance applies (false for contract notes,

@@ -587,6 +587,7 @@ export function ChatShell({
       fileToken: result.fileToken,
       ttlSeconds: result.ttlSeconds,
       expiresAt: result.expiresAt,
+      source: 'contract-note',
       passwordNote: descriptor.result.passwordNote,
       helpKind: descriptor.result.helpKind,
       emailable: false, // contract notes have no email delivery
@@ -616,10 +617,11 @@ export function ChatShell({
     file: FileInfo,
     ttlSeconds?: number,
     expiresAt?: string,
+    source: 'report' | 'contract-note' = 'report',
   ) {
     // Native host first (CHO-230): hand the file to Android via the bridge.
     // No bridge → the browser download stays the web fallback.
-    if (sendFileToHost(fileToken, file, { source: 'report', ttlSeconds, expiresAt })) return
+    if (sendFileToHost(fileToken, file, { source, ttlSeconds, expiresAt })) return
     void downloadReportFile(fileToken, file.name)
   }
   function handleEmailIt(flowKey: string, values: FlowRun['values']) {
@@ -747,7 +749,7 @@ function MessageView({
   onEdit: (msgId: string, slotKey: string) => void
   onDeliver: (msgId: string, descriptor: FlowDescriptor, run: FlowRun, mode: DeliveryMode) => void
   onSticker: (descriptor: AnyFlowDescriptor) => void
-  onDownload: (fileToken: string, file: FileInfo, ttlSeconds?: number, expiresAt?: string) => void
+  onDownload: (fileToken: string, file: FileInfo, ttlSeconds?: number, expiresAt?: string, source?: 'report' | 'contract-note') => void
   onEmailIt: (flowKey: string, values: FlowRun['values']) => void
   onHelp: (kind: HelpKind) => void
   onResend: () => void
@@ -812,7 +814,7 @@ function MessageView({
             file={m.file}
             passwordNote={m.passwordNote}
             emailable={m.emailable ?? true}
-            onDownload={() => onDownload(m.fileToken, m.file, m.ttlSeconds, m.expiresAt)}
+            onDownload={() => onDownload(m.fileToken, m.file, m.ttlSeconds, m.expiresAt, m.source)}
             onEmailIt={() => onEmailIt(m.flowKey, m.values)}
             onHelp={() => onHelp(m.helpKind)}
           />
