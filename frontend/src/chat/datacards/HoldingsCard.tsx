@@ -20,7 +20,6 @@ import { downloadHoldingsCsv } from './holdingsCsv'
 import { formatAsOf, formatInr } from './inr'
 import {
   AllocationBar,
-  CardFooter,
   CountUpValue,
   DataCardFrame,
   DetailCell,
@@ -99,13 +98,13 @@ export function HoldingsCard({ data, session }: Readonly<DataCardProps>) {
         />
       )}
 
-      {/* quiet footer */}
-      <CardFooter>
-        <span className="text-[11px] text-zinc-400 dark:text-zinc-500">
-          Ask again anytime — prices refetch on every request
-        </span>
+      {/* CHO-235: prominent full-width CSV action, then the quiet freshness note */}
+      <div className="border-t border-zinc-100 px-4 pt-3 pb-4 dark:border-zinc-800">
         <CsvButton rows={d.rows} userCode={session.userId ?? 'CLIENT'} />
-      </CardFooter>
+        <p className="mt-2.5 text-center text-[11px] text-zinc-400 dark:text-zinc-500">
+          Ask again anytime — prices refetch on every request
+        </p>
+      </div>
     </DataCardFrame>
   )
 }
@@ -182,6 +181,7 @@ function CsvButton({
 }: Readonly<{ rows: readonly HoldingRow[]; userCode: string }>) {
   const [status, setStatus] = useState<'idle' | 'busy' | 'ok'>('idle')
   const busyRef = useRef(false)
+  const count = rows.length
 
   function handleClick() {
     if (busyRef.current) return
@@ -199,25 +199,26 @@ function CsvButton({
     <button
       type="button"
       onClick={handleClick}
-      className={`inline-flex shrink-0 items-center gap-1.5 text-xs font-semibold ${
+      className={`flex w-full items-center justify-center gap-2 rounded-2xl py-3 text-sm font-semibold text-white shadow-lg transition active:scale-[0.99] ${
         status === 'ok'
-          ? 'cursor-default text-online dark:text-online-soft'
-          : 'text-accent hover:underline dark:text-accent-soft'
+          ? 'cursor-default bg-online'
+          : 'bg-accent shadow-accent/25 hover:bg-accent-strong'
       }`}
     >
       {status === 'idle' && (
         <>
-          <DownloadIcon className="size-3.5" /> Download CSV
+          <DownloadIcon className="size-4" /> Download CSV — all {count}{' '}
+          {count === 1 ? 'holding' : 'holdings'}
         </>
       )}
       {status === 'busy' && (
         <>
-          <span className="size-2 animate-pulse rounded-full bg-accent" /> Saving…
+          <span className="size-2 animate-pulse rounded-full bg-white" /> Saving…
         </>
       )}
       {status === 'ok' && (
         <>
-          <CheckIcon className="size-3.5" /> Saved to downloads
+          <CheckIcon className="size-4" /> Saved to downloads
         </>
       )}
     </button>
