@@ -27,3 +27,6 @@ playwright/.cache/
 
 # local embed demo — carries a live session token, never commit
 jini-embed-demo.html
+
+# deploy image tarballs (docker save output — build artifacts, never commit)
+jini-*.tar.gz
