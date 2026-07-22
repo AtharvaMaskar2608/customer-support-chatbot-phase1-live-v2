@@ -31,6 +31,7 @@ from typing import Any, Awaitable, Callable
 from app.agent.ctx import ToolCtx, ToolError
 from app.agent.forms import run_open_report_form
 from app.agent.tickets import run_raise_ticket
+from app.columns import run_report_columns
 from app.data.brokerage import run_brokerage
 from app.data.holdings import run_holdings
 from app.data.money import run_money
@@ -335,6 +336,39 @@ _TOOL_LIST = [
             "additionalProperties": False,
         },
         handler=run_kb_search,
+    ),
+    Tool(
+        name="get_report_columns",
+        description=(
+            "Return the exact columns and what each one means for a Choice "
+            "report: pnl, tax, ledger, contract-note, or holdings. Call this "
+            "whenever the user asks what a report contains, what a column or "
+            "field means, or how to read it. Answer ONLY from the result — use "
+            "the labels verbatim and never describe report columns from general "
+            "knowledge. See the report-columns rule."
+        ),
+        schema={
+            "type": "object",
+            "properties": {
+                "report": {
+                    "type": "string",
+                    "enum": [
+                        "pnl",
+                        "tax",
+                        "ledger",
+                        "contract-note",
+                        "holdings",
+                    ],
+                    "description": (
+                        "Which report's columns to fetch: pnl (P&L), tax "
+                        "(capital gains), ledger, contract-note, or holdings."
+                    ),
+                },
+            },
+            "required": ["report"],
+            "additionalProperties": False,
+        },
+        handler=run_report_columns,
     ),
     Tool(
         name="raise_support_ticket",
