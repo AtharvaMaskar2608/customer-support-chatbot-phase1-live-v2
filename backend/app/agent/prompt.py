@@ -34,6 +34,11 @@ a second breakpoint is what switches caching on for the first time. The
 system breakpoint is kept anyway — it costs nothing, and on
 `claude-sonnet-4-6` (the other configured model, minimum 2048) it does cache.
 
+The figures above are the CHO-226 baseline. Later prompt/tool additions grew the
+cached prefix further — the tax rule (CHO-227) and the report-columns rule plus
+the get_report_columns tool (CHO-228, now 12 tool schemas) — to ~5,344 tokens,
+still one cached prefix comfortably above 4,096.
+
 The primed turn is part of the PROMPT, not of the conversation: it is
 prepended to `thread.messages()` at call time and never stored as turns
 (store turns hold only the real conversation; `snapshot_text()` is what the
