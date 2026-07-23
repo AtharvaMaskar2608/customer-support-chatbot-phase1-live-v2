@@ -116,7 +116,7 @@ function FloatingControls({
         <button
           type="button"
           onClick={onRestart}
-          className="relative shrink-0 rounded-full bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white shadow-md dark:bg-zinc-100 dark:text-zinc-900"
+          className="relative shrink-0 rounded-full bg-[#EEF3FD] px-3 py-1.5 text-xs font-semibold text-[#1D4FB8] shadow-md dark:bg-[#EEF3FD] dark:text-[#1D4FB8]"
         >
           <span>🏠 Main Menu</span>
         </button>
@@ -125,7 +125,7 @@ function FloatingControls({
           type="button"
           aria-haspopup="dialog"
           onClick={onWhatsNew}
-          className="relative shrink-0 rounded-full bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white shadow-md dark:bg-zinc-100 dark:text-zinc-900"
+          className="relative shrink-0 rounded-full bg-[#EEF3FD] px-3 py-1.5 text-xs font-semibold text-[#1D4FB8] shadow-md dark:bg-[#EEF3FD] dark:text-[#1D4FB8]"
         >
           <span>✨ What's new</span>
           {whatsNewDot && (
