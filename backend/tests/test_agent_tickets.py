@@ -21,6 +21,7 @@ from app.agent.store import ThreadStore
 from app.agent.tickets import (
     render_transcript,
     run_raise_ticket,
+    ticket_call_is_user_initiated,
     ticket_memo,
 )
 from app.main import create_app
@@ -59,6 +60,42 @@ def _thread(turns=()):
 
 def _text(text):
     return [{"type": "text", "text": text}]
+
+
+# --- CHO-241: user-initiated ticket guard ------------------------------------
+
+
+def test_explicit_escalation_request_is_user_initiated():
+    for phrase in (
+        "please raise a ticket",
+        "raise a complaint about this",
+        "connect me to a human",
+        "I want to talk to an agent",
+        "can you escalate this",
+    ):
+        thread = _thread([("user", "user_text", _text(phrase))])
+        assert ticket_call_is_user_initiated(thread), phrase
+
+
+def test_affirmative_after_an_offer_is_user_initiated():
+    thread = _thread([
+        ("user", "user_text", _text("my withdrawal is stuck")),
+        ("assistant", "assistant_text", _text(
+            "Want me to raise a ticket so the team can take this up?"
+        )),
+        ("user", "user_text", _text("yes please")),
+    ])
+    assert ticket_call_is_user_initiated(thread)
+
+
+def test_preemptive_ticket_is_not_user_initiated():
+    thread = _thread([("user", "user_text", _text("what are the DP charges?"))])
+    assert not ticket_call_is_user_initiated(thread)
+
+
+def test_affirmative_without_a_prior_offer_is_not_user_initiated():
+    thread = _thread([("user", "user_text", _text("yes"))])
+    assert not ticket_call_is_user_initiated(thread)
 
 
 def _conversation_thread():
