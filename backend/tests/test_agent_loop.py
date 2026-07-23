@@ -230,6 +230,40 @@ def test_sonnet_minimal_thinking_kwargs(app, monkeypatch):
     assert "budget_tokens" not in json.dumps(kwargs["thinking"])
 
 
+def test_thinking_blocks_are_not_stored_or_rendered(app, monkeypatch):
+    monkeypatch.setenv("AGENT_THINKING", "minimal")
+    fake = FakeAnthropic([
+        FakeMessage(
+            [
+                {
+                    "type": "thinking",
+                    "thinking": "Need to reason about the account state.",
+                    "signature": "sig_123",
+                },
+                {
+                    "type": "redacted_thinking",
+                    "data": "opaque",
+                },
+                {"type": "text", "text": "Here is the final answer."},
+            ],
+            deltas=["Here is the final answer."],
+        )
+    ])
+    with TestClient(app) as client:
+        app.state.anthropic_client = fake
+        resp = _post_chat(client)
+        events = _parse_events(resp)
+
+    assert events == [
+        ("text", {"delta": "Here is the final answer."}),
+        ("done", {"thread": {"taskTurns": 1, "sessionTurns": 1, "lastSeq": 2}}),
+    ]
+
+    thread = _get_thread(app)
+    assert [t.kind for t in thread.turns] == ["user_text", "assistant_text"]
+    assert thread.turns[-1].content == [{"type": "text", "text": "Here is the final answer."}]
+
+
 # --- parallel tools, error bounce --------------------------------------------
 
 
