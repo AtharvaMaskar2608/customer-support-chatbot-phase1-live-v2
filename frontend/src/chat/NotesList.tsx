@@ -13,11 +13,9 @@ const INITIAL_VISIBLE = 10
 export function NotesList({
   notes,
   onPick,
-  onChangeDates,
 }: Readonly<{
   notes: ClientNote[]
   onPick: (note: ClientNote) => void
-  onChangeDates: () => void
 }>) {
   const [expanded, setExpanded] = useState(false)
   const [busy, setBusy] = useState<Set<string>>(new Set())
@@ -82,20 +80,17 @@ export function NotesList({
   }
 
   return (
-    <div className="flex flex-col gap-2.5">
-      <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900/60">
-        {rows}
-        {remaining > 0 && (
-          <button
-            type="button"
-            onClick={() => setExpanded(true)}
-            className="w-full border-t border-zinc-100 py-2.5 text-center text-[13px] font-semibold text-accent hover:bg-accent-tint/60 dark:border-zinc-800 dark:text-accent-soft dark:hover:bg-accent/10"
-          >
-            Show more ({remaining} remaining)
-          </button>
-        )}
-      </div>
-      <ChangeDatesButton onClick={onChangeDates} />
+    <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900/60">
+      {rows}
+      {remaining > 0 && (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="w-full border-t border-zinc-100 py-2.5 text-center text-[13px] font-semibold text-accent hover:bg-accent-tint/60 dark:border-zinc-800 dark:text-accent-soft dark:hover:bg-accent/10"
+        >
+          Show more ({remaining} remaining)
+        </button>
+      )}
     </div>
   )
 }

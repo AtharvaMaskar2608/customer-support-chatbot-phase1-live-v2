@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUpIcon, RefreshIcon } from '../icons'
+import { ArrowUpIcon } from '../icons'
 import { hasCredentials, type SessionContext } from '../session'
 import { getFlow, matchFlow } from '../flow/registry'
 import { getDataFlow, matchDataFlow } from '../flow/dataRegistry'
@@ -490,10 +490,10 @@ export function ChatShell({
     if (descriptor) void generateData(descriptor)
   }
 
-  /** CHO-249: spawn a FRESH seeded flow card below a delivered report so the
-   *  user can adjust the inputs and run it again — the delivered card stays as
-   *  history (spawn-fresh-below). Guided-flow reports only (agent file
-   *  artifacts carry no slot values to seed). */
+  /** CHO-256: spawn a FRESH seeded flow card below a NO-DATA report result so
+   *  the user can pick a different range and run it again — the earlier message
+   *  stays as history (spawn-fresh-below), never mutated in place. Guided-flow
+   *  reports only (they carry the attempted slot values to seed). */
   function handleAdjustRerun(flowKey: string, values: FilledValues) {
     const descriptor = getFlow(flowKey)
     if (!descriptor) return
@@ -509,14 +509,18 @@ export function ChatShell({
     if (result.kind === 'error') {
       if (result.code === 'AUTH_EXPIRED') handleAuthExpired('report') // CHO-231
       bot(errorLine(result.code))
+      // CHO-256: a no-data result offers a fresh "try a different range" flow;
+      // AUTH_EXPIRED / generic errors keep text-only remediation (a range
+      // change does not resolve them).
+      if (result.code === 'NO_DATA') {
+        append({ id: nextId(), kind: 'reportRetry', flowKey: descriptor.key, values })
+      }
       return
     }
     if (result.kind === 'email') {
       append({
         id: nextId(),
         kind: 'email',
-        flowKey: descriptor.key,
-        values,
         noun: descriptor.result.emailNoun(values),
         emailMasked: result.emailMasked,
       })
@@ -575,7 +579,7 @@ export function ChatShell({
     }
     if (result.notes.length === 1) {
       // Single-note shortcut: skip the list, download the one note directly.
-      await deliverNote(descriptor, flowMsgId, slot.source.download, result.notes[0], true)
+      await deliverNote(descriptor, slot.source.download, result.notes[0], true)
       return
     }
     bot(`Found **${result.notes.length}** contract notes for **${range.label}** — tap any to get it here.`)
@@ -590,7 +594,6 @@ export function ChatShell({
 
   async function deliverNote(
     descriptor: FlowDescriptor,
-    flowMsgId: string,
     downloadEndpoint: string,
     note: ClientNote,
     single: boolean,
@@ -617,22 +620,24 @@ export function ChatShell({
       helpKind: descriptor.result.helpKind,
       emailable: false, // contract notes have no email delivery
     })
-    if (single) append({ id: nextId(), kind: 'notesAction', flowMsgId, label: 'Other dates' })
+    // CHO-255: a delivered note is a success — no "Change dates" affordance here
+    // (it belongs only on the empty/error result).
   }
 
   function handleNoteTap(flowMsgId: string, downloadEndpoint: string, note: ClientNote) {
     const flowMsg = messages.find((m) => m.id === flowMsgId)
     const descriptor = flowMsg?.kind === 'flow' ? getFlow(flowMsg.run.flowKey) : undefined
     if (!descriptor) return
-    void deliverNote(descriptor, flowMsgId, downloadEndpoint, note, false)
+    void deliverNote(descriptor, downloadEndpoint, note, false)
   }
 
   function handleChangeDates(flowMsgId: string) {
     const flowMsg = messages.find((m) => m.id === flowMsgId)
     const descriptor = flowMsg?.kind === 'flow' ? getFlow(flowMsg.run.flowKey) : undefined
-    const dateSlot = descriptor?.slots.find((s) => s.type === 'date')
-    if (!dateSlot) return
-    handleEdit(flowMsgId, dateSlot.key) // reopens the date step + clears the list
+    if (!descriptor) return
+    // CHO-255: start a FRESH flow as a new message (its own intro + a new date
+    // prompt) rather than re-opening the empty/error card's date step in place.
+    runFlowBody(descriptor)
   }
 
   /* ── result-card actions ────────────────────────────────────────────── */
@@ -849,9 +854,6 @@ function MessageView({
             onEmailIt={() => onEmailIt(m.flowKey, m.values)}
             onHelp={() => onHelp(m.helpKind)}
           />
-          {Object.keys(m.values).length > 0 && (
-            <AdjustRerunButton onClick={() => onAdjustRerun(m.flowKey, m.values)} />
-          )}
           <FeedbackChip rating={m.feedback} onRate={(rating) => onRate(m.id, rating)} />
         </div>
       )
@@ -859,9 +861,6 @@ function MessageView({
       return (
         <div className="flex flex-col gap-1.5">
           <EmailCard noun={m.noun} emailMasked={m.emailMasked} onHelp={() => onHelp('email')} />
-          {Object.keys(m.values).length > 0 && (
-            <AdjustRerunButton onClick={() => onAdjustRerun(m.flowKey, m.values)} />
-          )}
           <FeedbackChip rating={m.feedback} onRate={(rating) => onRate(m.id, rating)} />
         </div>
       )
@@ -870,11 +869,19 @@ function MessageView({
         <NotesList
           notes={m.notes}
           onPick={(note) => onNoteTap(m.flowMsgId, m.downloadEndpoint, note)}
-          onChangeDates={() => onChangeDates(m.flowMsgId)}
         />
       )
     case 'notesAction':
       return <ChangeDatesButton label={m.label} onClick={() => onChangeDates(m.flowMsgId)} />
+    case 'reportRetry':
+      // CHO-256: no-data report → a calendar pill (like contract notes) that
+      // spawns a fresh seeded flow to try a different range.
+      return (
+        <ChangeDatesButton
+          label="Try a different range"
+          onClick={() => onAdjustRerun(m.flowKey, m.values)}
+        />
+      )
     case 'help':
       return <HelpCard helpKind={m.helpKind} onResend={onResend} onRaiseTicket={onRaiseTicket} />
     case 'ticket':
@@ -915,20 +922,6 @@ function MessageView({
 }
 
 /* ── pinned composer ──────────────────────────────────────────────────── */
-
-/** CHO-249: "Adjust & run again" pill under a delivered report — spawns a
- *  fresh seeded flow card below to tweak inputs and re-deliver. */
-function AdjustRerunButton({ onClick }: Readonly<{ onClick: () => void }>) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="inline-flex w-fit items-center gap-1.5 rounded-full border-[1.5px] border-zinc-200 bg-white px-3.5 py-1.5 text-[13px] font-semibold text-accent transition-colors hover:border-accent-soft hover:bg-accent-tint dark:border-zinc-700 dark:bg-zinc-900 dark:text-accent-soft dark:hover:bg-accent/15"
-    >
-      <RefreshIcon className="size-4" /> Adjust &amp; run again
-    </button>
-  )
-}
 
 function Composer({
   onSubmit,
