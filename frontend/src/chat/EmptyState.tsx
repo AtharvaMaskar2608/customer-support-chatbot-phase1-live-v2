@@ -78,11 +78,11 @@ export function EmptyState({
           <Headline firstName={firstName} template={greeting?.template ?? null} />
         </h2>
         <p className="mt-3 text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
-          Reports, charges, processes, ticket status.
+          Fetch your reports instantly, explain charges and processes.
         </p>
         <p className="text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
-          Files land right here —{' '}
-          <span className="font-medium text-online dark:text-online-soft">
+          Files land right here in chat —{' '}
+          <span className="font-medium text-accent dark:text-accent-soft">
             no email verification needed.
           </span>
         </p>
