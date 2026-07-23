@@ -951,7 +951,7 @@ function Composer({
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
         placeholder="Reports, charges, processes, tickets…"
-        aria-label="Ask Choice Jini"
+        aria-label="Ask AskFinX"
         className="min-w-0 flex-1 bg-transparent py-2 text-[13.5px] text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100 dark:placeholder:text-zinc-500"
       />
       <button

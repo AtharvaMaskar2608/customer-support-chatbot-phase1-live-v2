@@ -45,7 +45,7 @@ function Header({
 
       <div className="min-w-0 flex-1">
         <h1 className="truncate text-[15px] font-semibold text-zinc-900 dark:text-zinc-50">
-          Choice Jini
+          AskFinX
         </h1>
         <p className="flex items-center gap-1.5 text-xs leading-4">
           <span className="size-1.5 shrink-0 rounded-full bg-online dark:bg-online-soft" />

@@ -80,12 +80,12 @@ export function WhatsNewModal({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="What's new in Jini"
+        aria-label="What's new in AskFinX"
         className="w-full max-w-[340px] rounded-3xl border border-zinc-200/80 bg-white p-5 shadow-2xl shadow-zinc-950/20 dark:border-zinc-700/60 dark:bg-zinc-900 dark:shadow-black/50"
       >
         <div className="flex items-center justify-between">
           <h2 className="text-[17px] font-bold text-zinc-900 dark:text-zinc-50">
-            ✨ What's new in Jini
+            ✨ What's new in AskFinX
           </h2>
           <button
             type="button"

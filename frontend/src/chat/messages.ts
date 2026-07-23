@@ -103,7 +103,7 @@ export type Message =
 export function errorLine(code: ReportErrorCode): string {
   switch (code) {
     case 'AUTH_EXPIRED':
-      return "Your session's expired — please reopen Jini from FinX and try again."
+      return "Your session's expired — please reopen AskFinX from FinX and try again."
     case 'NO_DATA':
       return "I couldn't find any P&L for that period. Want to try a different date range?"
     default:
@@ -115,7 +115,7 @@ export function errorLine(code: ReportErrorCode): string {
 export function dataErrorLine(code: DataErrorCode, noun: string): string {
   switch (code) {
     case 'auth_expired':
-      return "Your session's expired — please reopen Jini from FinX and try again."
+      return "Your session's expired — please reopen AskFinX from FinX and try again."
     case 'no_data':
       return `I couldn't find ${noun} just now. Want to try again in a moment?`
     default:
