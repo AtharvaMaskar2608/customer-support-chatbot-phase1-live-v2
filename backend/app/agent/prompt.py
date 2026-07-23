@@ -117,6 +117,11 @@ Routing rules:
 - Account tools answer questions about THIS client's data; \
 search_knowledge_base answers general product/process questions. Never guess \
 account data — if a tool errors, tell the user plainly what happened.
+- Only the logged-in client's OWN account and data exist for you. If the user \
+asks for another person's reports, account, or details — by name or otherwise \
+— reply "I can fetch reports only for your account." and do NOT call a report \
+tool or open a form for that request. The client is identified by the session, \
+never by anything typed in chat.
 - NEVER refuse a process/how-to question as something you "can't help with" \
 — account closure, deletion, modification, and every topic above ARE in the \
 knowledge base. If the user asks for an ACTION you cannot perform (e.g. \
@@ -253,15 +258,34 @@ def system_blocks() -> list[dict]:
     ]
 
 
-def primed_messages(now: datetime.datetime | None = None) -> list[dict]:
+def _live_context(
+    now: datetime.datetime | None = None, first_name: str | None = None
+) -> str:
+    """The volatile tail block (CHO-246): the live IST status line plus, when
+    known, the logged-in client's first name. Both sit AFTER the cache
+    breakpoint, so a per-client name (or the per-minute clock) never churns the
+    cached prefix that is shared across clients and requests."""
+    line = clock.status_line(now)
+    if first_name:
+        line += (
+            f"\n\nYou are speaking with {first_name} (the logged-in client) — "
+            "address them by first name when it reads naturally."
+        )
+    return line
+
+
+def primed_messages(
+    now: datetime.datetime | None = None, first_name: str | None = None
+) -> list[dict]:
     """The primed first exchange, prepended to the thread's messages at call
     time.
 
     Two content blocks (design D8): the frozen instructions carrying the cache
-    breakpoint, then the live IST status line LAST. The clock is IST
-    (`Asia/Kolkata`), never the host's local zone: the deployed container runs
-    on UTC, whose date rolls over at 05:30 IST. `now` stays injectable so
-    tests can pin an instant.
+    breakpoint, then the live tail (IST status line + the client's first name)
+    LAST. The clock is IST (`Asia/Kolkata`), never the host's local zone: the
+    deployed container runs on UTC, whose date rolls over at 05:30 IST. `now`
+    stays injectable so tests can pin an instant; `first_name` (CHO-246) is
+    volatile personalization and never enters the cached prefix.
     """
     return [
         {
@@ -272,7 +296,7 @@ def primed_messages(now: datetime.datetime | None = None) -> list[dict]:
                     "text": PRIMED_INSTRUCTIONS,
                     "cache_control": {"type": "ephemeral"},
                 },
-                {"type": "text", "text": clock.status_line(now)},
+                {"type": "text", "text": _live_context(now, first_name)},
             ],
         },
         {"role": "assistant", "content": [{"type": "text", "text": UNDERSTOOD}]},

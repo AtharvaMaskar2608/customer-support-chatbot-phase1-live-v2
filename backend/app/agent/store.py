@@ -158,6 +158,11 @@ class Thread:
     created_at: datetime = field(default_factory=_now)
     last_active_at: datetime = field(default_factory=_now)
     turns: list[Turn] = field(default_factory=list)
+    # CHO-246: the client's first name for agent context, fetched once per
+    # conversation (best-effort). Transient — never persisted; `name_fetched`
+    # guards against re-fetching on every turn.
+    first_name: str | None = None
+    name_fetched: bool = False
 
     @property
     def next_seq(self) -> int:
