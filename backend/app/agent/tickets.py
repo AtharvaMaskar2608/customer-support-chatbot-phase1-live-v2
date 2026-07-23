@@ -8,8 +8,10 @@ status/priority/source/type, tags, and custom fields are byte-for-byte the
 established contract (design D1), so bot tickets land where the support
 workflow already expects them.
 
-Requester identity is the client code only (`unique_external_id` + `name`);
-no email or phone ever leaves our system. Credentials (API root/key) come
+Requester identity is the client code (`unique_external_id` + `name`) plus,
+when available, the client's email and phone — CHO-245 fetches them from the
+Profile API so support can reach the client (best-effort; a lookup failure just
+leaves the client code). Credentials (API root/key) come
 from server-side config at call time — never logged, never in tool schemas,
 never stored in the conversation. Upstream logging is status + timing only
 (FinxClient posture): no body, no URL, no credential.
@@ -28,7 +30,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app import config
+from app import config, greeting
 from app.agent.ctx import CODE_UPSTREAM_ERROR, ToolCtx, ToolError, parse_params
 
 logger = logging.getLogger("app.agent.tickets")
@@ -242,6 +244,15 @@ async def run_raise_ticket(
         logger.warning("freshdesk not configured — ticket not raised")
         return ToolError(code=CODE_UPSTREAM_ERROR, message=_UNREACHABLE_MESSAGE)
 
+    # CHO-245: attach the client's email + phone so support can reach them.
+    # Best-effort — a failure just leaves the requester identified by client code.
+    contact = await greeting.fetch_contact_fields(
+        ctx.http_client,
+        sso_jwt=ctx.sso_jwt,
+        session_id=ctx.session_id,
+        client_code=ctx.client_code,
+    )
+
     # The exact D1 payload — identity and routing come from the authenticated
     # ctx and code/config constants, never from model-controlled fields.
     payload = {
@@ -265,6 +276,11 @@ async def run_raise_ticket(
             "cf_query_sub_type": "finx-bot-test",
         },
     }
+    # CHO-245: requester contact fields, only when present + well-formed.
+    if contact.get("email"):
+        payload["email"] = contact["email"]
+    if contact.get("phone"):
+        payload["phone"] = contact["phone"]
 
     started = time.perf_counter()
     try:
