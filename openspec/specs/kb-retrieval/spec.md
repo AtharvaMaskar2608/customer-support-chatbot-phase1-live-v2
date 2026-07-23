@@ -22,11 +22,11 @@ The query SHALL be embedded with the same model family the corpus was embedded w
 - **THEN** the response carries FTS-only results with the degraded flag instead of an error
 
 ### Requirement: Tool-shaped endpoint
-`POST /api/kb/search` SHALL accept `{"query": string (1–1000 chars), "top_k": int 1–20 (default 5)}` and return `{"kind":"ok","results":[{id, topic, section, question, answer, tat, score}...]}` ranked by fused score, with `tat` null when absent. The contract SHALL be stateless (no session headers required) and stable for direct registration as an agent tool. Invalid input SHALL return a 422 with field errors.
+`POST /api/kb/search` SHALL accept `{"query": string (1–1000 chars), "top_k": int 1–20 (default 10)}` and return `{"kind":"ok","results":[{id, topic, section, question, answer, tat, score}...]}` ranked by fused score, with `tat` null when absent. The contract SHALL be stateless (no session headers required) and stable for direct registration as an agent tool. Invalid input SHALL return a 422 with field errors.
 
 #### Scenario: Basic search
-- **WHEN** the agent posts `{"query":"what are the DP charges","top_k":5}`
-- **THEN** it receives up to 5 ranked results each carrying the full answer text and metadata
+- **WHEN** the agent posts `{"query":"what are the DP charges","top_k":10}`
+- **THEN** it receives up to 10 ranked results each carrying the full answer text and metadata
 
 #### Scenario: Empty result
 - **WHEN** no chunk clears retrieval

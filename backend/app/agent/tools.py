@@ -329,7 +329,7 @@ _TOOL_LIST = [
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 20,
-                    "description": "How many results to return (default 5).",
+                    "description": "How many results to return (default 10).",
                 },
             },
             "required": ["query"],

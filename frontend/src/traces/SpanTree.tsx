@@ -2,7 +2,8 @@
  * The execution graph for one turn: agent → llm / tool → retriever, nested by
  * `parent_id`. Each row shows the span type, name, duration and the key
  * metadata for its kind (llm: model + token split; tool: error flag; retriever:
- * chunk count + embedder). A row expands to reveal its masked input/output.
+ * chunk count + embedder). A row expands to reveal its masked input/output
+ * and, for retriever spans, the stored retrieval_context chunk list (CHO-267).
  */
 
 import { useState } from 'react'
@@ -67,12 +68,20 @@ function MetaLine({ span }: Readonly<{ span: Span }>) {
   )
 }
 
+function retrievalChunks(span: Span): string[] {
+  const ctx = span.metadata?.retrieval_context
+  if (!Array.isArray(ctx)) return []
+  return ctx.filter((c): c is string => typeof c === 'string' && c.length > 0)
+}
+
 function Row({ node, depth }: Readonly<{ node: SpanNode; depth: number }>) {
   const { span } = node
   const [open, setOpen] = useState(false)
   const inputText = fmtPayload(span.input)
   const outputText = fmtPayload(span.output)
-  const hasIo = inputText.length > 0 || outputText.length > 0
+  const chunks = span.type === 'retriever' ? retrievalChunks(span) : []
+  const hasIo =
+    inputText.length > 0 || outputText.length > 0 || chunks.length > 0
   const isError = span.type === 'tool' && span.metadata?.is_error === true
 
   return (
@@ -110,6 +119,24 @@ function Row({ node, depth }: Readonly<{ node: SpanNode; depth: number }>) {
         >
           {inputText && <Payload label="input" text={inputText} />}
           {outputText && <Payload label="output" text={outputText} />}
+          {chunks.length > 0 && (
+            <div>
+              <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-zinc-400 uppercase">
+                retrieval context ({chunks.length})
+              </div>
+              <ol className="max-h-80 space-y-2 overflow-auto rounded-md bg-zinc-100 p-2 dark:bg-zinc-900">
+                {chunks.map((chunk, i) => (
+                  <li
+                    key={i}
+                    className="border-b border-zinc-200 pb-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-zinc-700 last:border-b-0 last:pb-0 dark:border-zinc-800 dark:text-zinc-300"
+                  >
+                    <span className="mr-1.5 text-zinc-400 tabular-nums">{i + 1}.</span>
+                    {chunk}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
         </div>
       )}
 
