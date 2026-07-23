@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>Trace Viewer — AskFinX</title>
+    <script>
+      // Operator theme: follow the OS unless a choice is stored, applied before
+      // paint so neither theme flashes. The toggle in-app persists 'traces-theme'.
+      ;(function () {
+        try {
+          var stored = localStorage.getItem('traces-theme')
+          var dark =
+            stored !== null
+              ? stored === 'dark'
+              : window.matchMedia('(prefers-color-scheme: dark)').matches
+          if (dark) document.documentElement.dataset.theme = 'dark'
+        } catch (e) {
+          /* localStorage / matchMedia unavailable — default light */
+        }
+      })()
+    </script>
+    <style>
+      /* Pre-CSS backdrop so the page surface matches before the bundle loads. */
+      html {
+        background-color: #fafafa;
+        color-scheme: light;
+      }
+      html[data-theme='dark'] {
+        background-color: #09090b;
+        color-scheme: dark;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/traces/main.tsx"></script>
+  </body>
+</html>

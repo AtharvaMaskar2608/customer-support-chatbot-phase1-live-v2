@@ -338,3 +338,19 @@ def tracing_salt() -> str:
     client code used as trace thread/user ids (TRACING_SALT env). It
     pseudonymises the grouping key; it is not itself a secret."""
     return os.environ.get("TRACING_SALT", "jini-tracing")
+
+
+# --- Trace viewer dashboard (CHO-262) ---------------------------------------
+#
+# The read-only admin dashboard over the agent_traces table is gated by a
+# single shared admin token — NOT the per-user FinX session auth (a viewer is
+# an operator, not a chat user). The token is a secret (env, or repo-root .env
+# in dev; never logged). When it is UNSET the dashboard is fully disabled: every
+# /api/traces* endpoint answers 404, so nothing is exposed by default.
+
+
+def traces_admin_token() -> str | None:
+    """Shared admin token gating the trace viewer (TRACES_ADMIN_TOKEN env, or
+    repo-root .env in dev). None => the dashboard is disabled (endpoints 404).
+    Never logged."""
+    return _secret("TRACES_ADMIN_TOKEN")
