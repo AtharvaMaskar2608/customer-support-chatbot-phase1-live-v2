@@ -41,6 +41,41 @@ import { RichText } from './RichText'
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
+/**
+ * Cycle a narrate pill through `steps` at `stepMs` until `pending` settles.
+ * Caller shows steps[0] before starting the fetch; this advances (wrapping to 0)
+ * while the promise is still pending, then returns promptly — no post-sequence
+ * tail delay. CHO-251.
+ */
+async function cycleNarration(
+  narrId: string,
+  steps: readonly string[],
+  pending: Promise<unknown>,
+  updateCaption: (id: string, caption: string) => void,
+  stepMs = 720,
+): Promise<void> {
+  if (steps.length === 0) return
+  let settled = false
+  const untilDone = pending.then(
+    () => {
+      settled = true
+      return 'done' as const
+    },
+    () => {
+      settled = true
+      return 'done' as const
+    },
+  )
+  let i = 0
+  for (;;) {
+    const winner = await Promise.race([delay(stepMs).then(() => 'tick' as const), untilDone])
+    if (winner === 'done' || settled) return
+    i = (i + 1) % steps.length
+    if (settled) return
+    updateCaption(narrId, steps[i])
+  }
+}
+
 /** A flow is live when it has a backend binding (P&L/Ledger/Tax) or a selection
  *  slot (Contract Notes drives its own list + download calls, not the generic
  *  delivery step). `comingSoon` still forces the stub. */
@@ -437,17 +472,13 @@ export function ChatShell({
     const narrId = nextId()
     append({ id: narrId, kind: 'narrate', caption: steps[0] })
 
-    // Fetch and narration run in parallel; the pill holds its last caption
-    // until the response resolves.
+    // Fetch and narration run in parallel; captions cycle until the response
+    // resolves so a slow fetch never freezes on the last step (CHO-251).
     const resultP: Promise<ReportResult> = descriptor.backend
       ? submitReport(descriptor.backend, values, mode, session)
       : Promise.resolve({ kind: 'error', code: 'UPSTREAM_ERROR' })
 
-    for (let i = 1; i < steps.length; i += 1) {
-      await delay(720)
-      updateCaption(narrId, steps[i])
-    }
-    await delay(560)
+    await cycleNarration(narrId, steps, resultP, updateCaption)
     const result = await resultP
     remove(narrId)
     renderResult(descriptor, values, result)
@@ -460,11 +491,7 @@ export function ChatShell({
     append({ id: narrId, kind: 'narrate', caption: descriptor.narration[0] })
 
     const resultP = descriptor.fetch(session)
-    for (let i = 1; i < descriptor.narration.length; i += 1) {
-      await delay(720)
-      updateCaption(narrId, descriptor.narration[i])
-    }
-    await delay(560)
+    await cycleNarration(narrId, descriptor.narration, resultP, updateCaption)
     const result = await resultP
     remove(narrId)
 
@@ -558,11 +585,7 @@ export function ChatShell({
     append({ id: narrId, kind: 'narrate', caption: narration[0] })
 
     const listP = fetchContractNotes(slot.source.endpoint, range.fromDate, range.toDate, session)
-    for (let i = 1; i < narration.length; i += 1) {
-      await delay(720)
-      updateCaption(narrId, narration[i])
-    }
-    await delay(400)
+    await cycleNarration(narrId, narration, listP, updateCaption)
     const result = await listP
     remove(narrId)
 
