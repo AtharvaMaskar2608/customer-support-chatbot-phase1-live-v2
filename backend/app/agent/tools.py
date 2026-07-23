@@ -303,8 +303,8 @@ _TOOL_LIST = [
             "Fetch the client's personalized brokerage rate card (charges "
             "per segment and order type). Call this when the user asks what "
             "brokerage or charges they pay. Takes no parameters. For "
-            "questions about what a charge MEANS, prefer "
-            "search_knowledge_base."
+            "questions about what a charge MEANS (definition or how-to), "
+            "call search_knowledge_base instead."
         ),
         schema=_EMPTY_SCHEMA,
         handler=run_brokerage,
@@ -312,11 +312,11 @@ _TOOL_LIST = [
     Tool(
         name="search_knowledge_base",
         description=(
-            "Search Choice's support knowledge base for factual answers "
-            "about products, processes, charges, and how-tos (e.g. account "
-            "opening, fund transfer steps, what a term means). Call this for "
-            "general questions that are NOT about the client's own account "
-            "data. Summarize the results in your own words."
+            "Fetch factual support answers for general product, process, "
+            "charges, and how-to questions (e.g. account opening, fund "
+            "transfer steps, what a term means). Call this for general "
+            "questions that are NOT about the client's own account data. "
+            "Answer the user directly from what the tool returns."
         ),
         schema={
             "type": "object",
