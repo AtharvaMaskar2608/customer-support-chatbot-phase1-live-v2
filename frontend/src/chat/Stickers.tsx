@@ -27,6 +27,8 @@ const ALL_FLOWS: AnyFlowDescriptor[] = [...FLOWS, ...DATA_FLOWS]
  * registries — so a new flow's sticker (file or data) appears the moment its
  * descriptor file lands, with no edit here. Used both as the empty-state
  * stickers and as the reply when composer text matches no flow.
+ *
+ * CHO-268: always show the full wrap row (no landing pager).
  */
 export function Stickers({ onPick }: Readonly<{ onPick: (flow: AnyFlowDescriptor) => void }>) {
   return (
