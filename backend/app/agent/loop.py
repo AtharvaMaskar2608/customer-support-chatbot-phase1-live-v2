@@ -35,7 +35,7 @@ import logging
 import time
 from typing import Any, AsyncIterator
 
-from app import config
+from app import config, greeting
 from app.agent import caps as agent_caps
 from app.agent import prompt as agent_prompt
 from app.agent import tickets as agent_tickets
@@ -208,6 +208,16 @@ async def _chat_events(
     # renders its transcript from ctx.thread — same live object, so turns
     # appended below are visible when the tool runs.
     ctx.thread = thread
+    # CHO-246: the client's first name for prompt personalization, fetched once
+    # per conversation (best-effort; None simply means no name is shown).
+    if not thread.name_fetched:
+        thread.first_name = await greeting.fetch_first_name(
+            ctx.http_client,
+            sso_jwt=ctx.sso_jwt,
+            session_id=ctx.session_id,
+            client_code=ctx.client_code,
+        )
+        thread.name_fetched = True
     store.append_turn(
         thread,
         role="user",
@@ -232,7 +242,7 @@ async def _chat_events(
 
     while True:
         force_wrapup = rounds >= config.agent_max_tool_rounds()
-        messages = agent_prompt.primed_messages() + thread.messages()
+        messages = agent_prompt.primed_messages(first_name=thread.first_name) + thread.messages()
         if escalation_reminder is not None:
             messages.append(_reminder_message(escalation_reminder))
         if force_wrapup:

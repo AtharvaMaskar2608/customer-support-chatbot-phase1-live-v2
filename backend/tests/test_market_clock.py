@@ -431,6 +431,29 @@ def test_snapshot_keeps_placeholders_so_the_hash_is_time_stable():
     assert snapshot_text() == text
 
 
+def test_first_name_rides_the_volatile_block_not_the_cached_prefix():
+    """CHO-246: the client's first name appears only in the post-breakpoint
+    tail block, never in the cached instructions — so per-client names never
+    churn the shared cached prefix."""
+    blocks = primed_messages(at(2026, 7, 20, 14, 47), first_name="Harsha")[0]["content"]
+    assert "Harsha" not in blocks[0]["text"]
+    assert "Harsha" in blocks[1]["text"]
+    # No name → the tail is just the status line (no dangling name text).
+    plain = primed_messages(at(2026, 7, 20, 14, 47))[0]["content"][1]["text"]
+    assert "speaking with" not in plain
+
+
+def test_first_name_never_enters_the_prompt_snapshot():
+    """The name is volatile, so the recorded snapshot (the hash source) must
+    not carry it — the prompt hash stays stable across clients."""
+    assert "Harsha" not in snapshot_text()
+
+
+def test_self_only_data_guardrail_is_in_the_frozen_instructions():
+    """CHO-246: the 'only your own account' rule ships in the cached prompt."""
+    assert "I can fetch reports only for your account." in PRIMED_INSTRUCTIONS
+
+
 def test_snapshot_records_no_rendered_clock():
     assert "Right now it is 2:47 pm" not in snapshot_text()
 

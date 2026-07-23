@@ -182,6 +182,38 @@ async def _fetch_profile(
     return None
 
 
+async def fetch_first_name(
+    client: httpx.AsyncClient,
+    *,
+    sso_jwt: str,
+    session_id: str,
+    client_code: str,
+) -> str | None:
+    """The client's first name for agent context (CHO-246), fetched from the
+    Profile API. Best-effort and NEVER raises: any failure (network, non-2xx,
+    malformed, or no name) returns None so the chat stream simply proceeds
+    without a name. The name is never logged (same PII posture as the greeting
+    route)."""
+    try:
+        started = time.perf_counter()
+        upstream = await _fetch_profile(
+            client, sso_jwt, session_id, client_code, started
+        )
+        if upstream is None or not 200 <= upstream.status_code < 300:
+            return None
+        payload = upstream.json()
+        if not isinstance(payload, dict) or payload.get("Status") != "Success":
+            return None
+        profile = payload.get("Response")
+        full_name = (
+            profile.get("FirstHolderName") if isinstance(profile, dict) else None
+        )
+        return derive_first_name(full_name)
+    except Exception as exc:  # best-effort: a name must never break the chat
+        logger.warning("agent name fetch failed error=%s", type(exc).__name__)
+        return None
+
+
 @router.get("/api/greeting")
 async def greeting(
     request: Request,
