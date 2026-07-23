@@ -1,20 +1,13 @@
 /**
- * Brokerage slab domain logic (brokerage-flow) — parse, cluster, label,
- * format. Ported faithfully from the approved prototype
- * (docs/prototype/report-flow-prototype.html — parseRate / brokerageClusters
- * / clusterHead / fmtInr / fmtPct).
+ * Brokerage slab domain logic (brokerage-flow) — parse, order segments,
+ * format. Ported from the approved prototype parseRate / fmtInr helpers;
+ * CHO-259 replaced cross-segment rate clustering with a fixed-order
+ * segment accordion (Equity → Derivative → Commodity → Currency).
  *
  * The slab arrives as per-segment groups of { title, desc } lines
- * ("₹20.00 for trade value of 10 thousand"). Slabs are PER-CLIENT, so the
- * rate clusters are computed from the response at render time, never
- * hardcoded: lines with an identical (unit, amount) parsed from `desc`
- * collapse — across segments — into one statement row
- * ("All futures · Stock · Index · Commodity · Currency").
- *
- * Honesty valve: ANY unparseable desc, or a slab that would need more than
- * 6 clusters, makes `brokerageClusters` return null and the card falls back
- * to the plain per-segment list with upstream text verbatim — a wrong
- * "All futures" claim must never render.
+ * ("₹20.00 for trade value of 10 thousand"). Per-line honesty: unparseable
+ * desc falls back to upstream text at the call site — never invent a
+ * cross-segment summary.
  *
  * Deliberately dependency-free (type-only module surface) so the algorithm
  * is directly runnable outside the app for verification.
@@ -47,24 +40,13 @@ export interface BrokerageData {
   groups: BrokerageGroup[]
 }
 
-/** A slab line tagged with its segment and parsed rate, ready to cluster. */
-export interface ClusteredItem {
-  /** Segment title, e.g. "Equity". */
-  seg: string
-  /** Line title, e.g. "Stock Future". */
-  title: string
-  rate: ParsedRate
-}
-
-export interface ClusterLabel {
-  /** Row headline, e.g. "Equity intraday" or "All futures". */
-  main: string
-  /** Coverage subline for multi-item clusters ("Stock · Index · …"), or null. */
-  cov: string | null
-}
-
-/** More clusters than this and the summary stops being a summary → fallback. */
-const MAX_CLUSTERS = 6
+/** Fixed accordion order (CHO-259) — API order is ignored. */
+export const BROKERAGE_SEGMENT_ORDER = [
+  'Equity',
+  'Derivative',
+  'Commodity',
+  'Currency',
+] as const
 
 /**
  * Parse one upstream desc into a rate. Recognized shapes:
@@ -88,71 +70,43 @@ export function formatRateInr(amt: number): string {
 }
 
 /** ₹-per-₹10,000 → the advertised percentage: ₹1 → "0.01%"; trailing zeros
- *  trimmed (₹20 → "0.2%", never "0.2000%"). */
+ *  trimmed (₹20 → "0.2%", never "0.2000%"). Kept for non-card callers. */
 export function formatRatePct(amt: number): string {
   return `${parseFloat((amt / 100).toFixed(4))}%`
 }
 
-/** The two-line right-hand display for a rate: primary value + official
- *  phrasing beneath (percentage-primary for value-based, flat for orders). */
-export function rateDisplay(rate: ParsedRate): { value: string; unit: string } {
+/**
+ * Single-line ₹-primary display for the brokerage card (CHO-259).
+ * Percentage-primary is intentionally not returned.
+ */
+export function rateDisplay(rate: ParsedRate): string {
   return rate.unit === 'per10k'
-    ? { value: formatRatePct(rate.amt), unit: `${formatRateInr(rate.amt)} per ₹10,000 traded` }
-    : { value: formatRateInr(rate.amt), unit: 'flat per order' }
+    ? `${formatRateInr(rate.amt)} per ₹10,000 traded`
+    : `${formatRateInr(rate.amt)} flat per order`
 }
 
 /**
- * Cluster the slab by identical (unit, amount) across all segments.
- * Returns the clusters in first-appearance order, or null when any desc
- * fails to parse or the slab needs more than MAX_CLUSTERS rows — the
- * caller then renders the per-segment fallback.
+ * Return non-empty groups in fixed Equity → Derivative → Commodity → Currency
+ * order. Unknown titles append after the known four, preserving their
+ * relative input order.
  */
-export function brokerageClusters(groups: readonly BrokerageGroup[]): ClusteredItem[][] | null {
-  const items: ClusteredItem[] = []
+export function orderBrokerageGroups(groups: readonly BrokerageGroup[]): BrokerageGroup[] {
+  const byTitle = new Map<string, BrokerageGroup>()
+  for (const g of groups) byTitle.set(g.title, g)
+
+  const ordered: BrokerageGroup[] = []
+  for (const title of BROKERAGE_SEGMENT_ORDER) {
+    const g = byTitle.get(title)
+    if (g) {
+      ordered.push(g)
+      byTitle.delete(title)
+    }
+  }
   for (const g of groups) {
-    for (const it of g.list) {
-      const rate = parseRate(it.desc)
-      if (!rate) return null // one unparseable line poisons the whole summary
-      items.push({ seg: g.title, title: it.title, rate })
+    if (byTitle.has(g.title)) {
+      ordered.push(g)
+      byTitle.delete(g.title)
     }
   }
-  const map = new Map<string, ClusteredItem[]>()
-  for (const it of items) {
-    const key = `${it.rate.unit}|${it.rate.amt}`
-    const bucket = map.get(key)
-    if (bucket) bucket.push(it)
-    else map.set(key, [it])
-  }
-  return map.size <= MAX_CLUSTERS ? [...map.values()] : null
-}
-
-/**
- * Label one cluster:
- *   singleton                        → "Equity intraday" (segment + lowercased title)
- *   shared last word ("Future" ×4)   → "All futures" + coverage subline of the
- *                                      titles with the kind stripped ("Stock ·
- *                                      Index · …"; a bare kind falls back to
- *                                      its segment title)
- *   mixed kinds                      → titles joined verbatim, no subline
- */
-export function clusterLabel(cluster: readonly ClusteredItem[]): ClusterLabel {
-  if (cluster.length === 1) {
-    const it = cluster[0]
-    return { main: `${it.seg} ${it.title.toLowerCase()}`, cov: null }
-  }
-  const kinds = cluster.map((it) => it.title.split(' ').pop() ?? it.title)
-  const kind = kinds[0]
-  if (kinds.every((k) => k === kind)) {
-    return {
-      main: `All ${kind.toLowerCase()}s`,
-      cov: cluster
-        .map((it) =>
-          it.title.endsWith(kind)
-            ? it.title.slice(0, it.title.length - kind.length).trimEnd() || it.seg
-            : it.title,
-        )
-        .join(' · '),
-    }
-  }
-  return { main: cluster.map((it) => it.title).join(' · '), cov: null }
+  return ordered
 }

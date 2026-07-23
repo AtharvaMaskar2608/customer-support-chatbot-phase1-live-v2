@@ -2,53 +2,64 @@
  * The brokerage rate card (brokerage-flow) — a pricing reference, never
  * charges billed.
  *
- * Anatomy per the approved prototype (.bcard): header ("Your brokerage
- * rates" + grouped-by-rate subline) → one statement row per computed rate
- * cluster (label + coverage subline · percentage-primary or flat-₹ value
- * with the official phrasing beneath) → statutory-charges footer note.
- *
- * Clustering is computed from THIS response at render time — slabs are
- * per-client. If any desc fails to parse, or the slab would need more than
- * 6 rows, the card falls back to the plain per-segment list with upstream
- * text verbatim (brokerageCluster.ts owns that honesty valve).
+ * CHO-259 anatomy: segment accordion (Equity → Derivative → Commodity →
+ * Currency) with FinX 22px colour tiles, ₹-primary rate lines, and a
+ * statutory-charges footer. Equity expands by default; panels toggle
+ * independently. Unparseable desc shows upstream text verbatim per line.
  */
 
+import { useState, type ReactNode, type SVGProps } from 'react'
 import type { DataCardProps } from '../../flow/dataflow'
 import {
-  brokerageClusters,
-  clusterLabel,
+  orderBrokerageGroups,
+  parseRate,
   rateDisplay,
   type BrokerageData,
   type BrokerageGroup,
-  type ClusteredItem,
+  type BrokerageItem,
 } from './brokerageCluster'
-import { DataCardFrame, HeroLabel } from './primitives'
+import { DataCardFrame } from './primitives'
+
+const SEGMENT_TILE: Record<string, { bg: string; fg: string }> = {
+  Equity: { bg: '#E8F0FE', fg: '#1D4FB8' },
+  Derivative: { bg: '#F0EBFE', fg: '#6941C6' },
+  Commodity: { bg: '#FEF4E6', fg: '#B76E00' },
+  Currency: { bg: '#E9F9F0', fg: '#17B26A' },
+}
+
+const NEUTRAL_TILE = { bg: '#F4F4F5', fg: '#71717A' }
 
 export function BrokerageCard({ data }: Readonly<DataCardProps>) {
-  // Sound narrow: the brokerage descriptor pairs this card with fetchBrokerage.
   const d = data as BrokerageData
-  const clusters = brokerageClusters(d.groups)
+  const groups = orderBrokerageGroups(d.groups)
+  const defaultKey = groups.some((g) => g.title === 'Equity')
+    ? 'Equity'
+    : (groups[0]?.title ?? null)
+
+  const [open, setOpen] = useState<ReadonlySet<string>>(() =>
+    defaultKey ? new Set([defaultKey]) : new Set(),
+  )
+
+  function toggle(title: string) {
+    setOpen((prev) => {
+      const next = new Set(prev)
+      if (next.has(title)) next.delete(title)
+      else next.add(title)
+      return next
+    })
+  }
 
   return (
     <DataCardFrame>
-      {/* header */}
-      <div className="px-4 pt-3.5 pb-[11px]">
-        <HeroLabel>Your brokerage rates</HeroLabel>
-        <div className="mt-0.5 text-xs text-zinc-400 dark:text-zinc-500">
-          What you pay to trade — grouped by rate
-        </div>
-      </div>
+      {groups.map((g) => (
+        <SegmentPanel
+          key={g.title}
+          group={g}
+          expanded={open.has(g.title)}
+          onToggle={() => toggle(g.title)}
+        />
+      ))}
 
-      {/* clustered statement rows, or the verbatim per-segment fallback */}
-      {clusters ? (
-        clusters.map((cluster) => (
-          <ClusterRow key={`${cluster[0].rate.unit}|${cluster[0].rate.amt}`} cluster={cluster} />
-        ))
-      ) : (
-        <SegmentList groups={d.groups} />
-      )}
-
-      {/* plan-vs-billed honesty */}
       <div className="border-t border-zinc-100 px-4 py-[11px] text-[11px] leading-normal text-zinc-400 dark:border-zinc-800 dark:text-zinc-500">
         Plus statutory charges (STT, exchange fees, GST, stamp duty). These are your plan&rsquo;s
         rates — a trade&rsquo;s actual charges are on its contract note.
@@ -57,51 +68,139 @@ export function BrokerageCard({ data }: Readonly<DataCardProps>) {
   )
 }
 
-/** One rate cluster: "All futures / Stock · Index · …" left, "0.2% / ₹20
- *  per ₹10,000 traded" right. Every item in the cluster shares one rate, so
- *  the first item's rate speaks for all of them. */
-function ClusterRow({ cluster }: Readonly<{ cluster: ClusteredItem[] }>) {
-  const { main, cov } = clusterLabel(cluster)
-  const { value, unit } = rateDisplay(cluster[0].rate)
+function SegmentPanel({
+  group,
+  expanded,
+  onToggle,
+}: Readonly<{ group: BrokerageGroup; expanded: boolean; onToggle: () => void }>) {
+  const tile = SEGMENT_TILE[group.title] ?? NEUTRAL_TILE
+  const count = group.list.length
+  const rateLabel = count === 1 ? '1 rate' : `${count} rates`
+
+  return (
+    <div className="border-t border-zinc-100 first:border-t-0 dark:border-zinc-800">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        className="flex w-full items-center gap-2.5 px-4 py-3 text-left"
+      >
+        <span
+          className="inline-flex size-[22px] shrink-0 items-center justify-center rounded-md"
+          style={{ backgroundColor: tile.bg, color: tile.fg }}
+          aria-hidden
+        >
+          <SegmentIcon title={group.title} className="size-3" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[12px] font-bold tracking-[0.06em] text-zinc-800 uppercase dark:text-zinc-100">
+            {group.title}
+          </span>
+          <span className="mt-0.5 block text-[11px] text-zinc-400 dark:text-zinc-500">
+            {rateLabel}
+          </span>
+        </span>
+        <ChevronIcon open={expanded} className="size-4 shrink-0 text-zinc-400 dark:text-zinc-500" />
+      </button>
+
+      {expanded && (
+        <div>
+          {group.list.map((it) => (
+            <RateRow key={it.title} item={it} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function RateRow({ item }: Readonly<{ item: BrokerageItem }>) {
+  const parsed = parseRate(item.desc)
+  const right = parsed ? rateDisplay(parsed) : item.desc
   return (
     <div className="flex items-center justify-between gap-3 border-t border-zinc-100 px-4 py-3 dark:border-zinc-800">
-      <div className="min-w-0">
-        <div className="text-[13.5px] font-bold">{main}</div>
-        {cov && <div className="mt-[3px] text-[11px] text-zinc-400 dark:text-zinc-500">{cov}</div>}
-      </div>
-      <div className="shrink-0 text-right">
-        <div className="text-[15px] font-extrabold tracking-[-0.01em] tabular-nums">{value}</div>
-        <div className="mt-0.5 text-[11px] text-zinc-400 tabular-nums dark:text-zinc-500">
-          {unit}
-        </div>
+      <div className="min-w-0 text-[13.5px] font-bold">{item.title}</div>
+      <div className="shrink-0 text-right text-[13px] font-semibold tabular-nums text-zinc-700 dark:text-zinc-200">
+        {right}
       </div>
     </div>
   )
 }
 
-/** Graceful fallback: segment headers on the track tint, upstream desc
- *  strings verbatim — shown whenever clustering declined to summarize. */
-function SegmentList({ groups }: Readonly<{ groups: BrokerageGroup[] }>) {
+function ChevronIcon({ open, className }: Readonly<{ open: boolean; className?: string }>) {
   return (
-    <>
-      {groups.map((g) => (
-        <div key={g.title}>
-          <div className="bg-zinc-100 px-3.5 pt-[11px] pb-1.5 text-[10.5px] font-bold tracking-[0.07em] text-zinc-400 uppercase dark:bg-zinc-800 dark:text-zinc-500">
-            {g.title}
-          </div>
-          {g.list.map((it) => (
-            <div
-              key={it.title}
-              className="flex items-center justify-between gap-3 border-t border-zinc-100 px-4 py-3 dark:border-zinc-800"
-            >
-              <div className="min-w-0 text-[13.5px] font-bold">{it.title}</div>
-              <div className="shrink-0 text-right text-[11px] text-zinc-400 tabular-nums dark:text-zinc-500">
-                {it.desc}
-              </div>
-            </div>
-          ))}
-        </div>
-      ))}
-    </>
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      {open ? <path d="M4 10l4-4 4 4" /> : <path d="M4 6l4 4 4-4" />}
+    </svg>
   )
+}
+
+function SegmentIcon({
+  title,
+  className,
+}: Readonly<{ title: string; className?: string }>): ReactNode {
+  const props: SVGProps<SVGSVGElement> = {
+    viewBox: '0 0 16 16',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.6,
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+    className,
+    'aria-hidden': true,
+  }
+  switch (title) {
+    case 'Equity':
+      // line-chart
+      return (
+        <svg {...props}>
+          <path d="M2 12 V3.5" />
+          <path d="M2 12 H13.5" />
+          <path d="M4 9.5 L7 6.5 L9.5 8.5 L13 4.5" />
+        </svg>
+      )
+    case 'Derivative':
+      // bar-chart
+      return (
+        <svg {...props}>
+          <path d="M3.5 12 V7.5" />
+          <path d="M8 12 V4" />
+          <path d="M12.5 12 V8.5" />
+        </svg>
+      )
+    case 'Commodity':
+      // coin
+      return (
+        <svg {...props}>
+          <circle cx="8" cy="8" r="5.25" />
+          <path d="M8 5.25 V10.75" />
+          <path d="M6.25 6.5 C6.25 5.7 7 5.25 8 5.25 C9 5.25 9.75 5.7 9.75 6.5 C9.75 7.5 6.25 7.75 6.25 8.75 C6.25 9.55 7 10 8 10 C9 10 9.75 9.55 9.75 8.75" />
+        </svg>
+      )
+    case 'Currency':
+      // exchange / circular arrows
+      return (
+        <svg {...props}>
+          <path d="M3.5 6.5 A4.5 4.5 0 0 1 12 5.5" />
+          <path d="M11 3.5 L12 5.5 L10 6" />
+          <path d="M12.5 9.5 A4.5 4.5 0 0 1 4 10.5" />
+          <path d="M5 12.5 L4 10.5 L6 10" />
+        </svg>
+      )
+    default:
+      return (
+        <svg {...props}>
+          <circle cx="8" cy="8" r="5.25" />
+        </svg>
+      )
+  }
 }

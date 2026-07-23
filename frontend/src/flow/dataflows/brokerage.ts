@@ -1,12 +1,11 @@
 /**
  * Brokerage data flow (brokerage-flow) — the rate card.
  *
- * Zero-slot: sticker tap (or keyword) → narrated fetch → the rate-clustered
- * card. The slab is per-client, so the clustering is computed from the
- * response at render time (chat/datacards/brokerageCluster.ts). The card
- * presents the PLAN, never charges billed — the statutory-charges +
- * contract-note honesty lives in the card copy, and the follow-up routes
- * "what did that trade cost me?" to the brokerage help card.
+ * Zero-slot: keyword → narrated fetch → segment accordion card (CHO-259).
+ * The slab is per-client; segment order and ₹ phrasing live in
+ * chat/datacards/brokerageCluster.ts. The card presents the PLAN, never
+ * charges billed — statutory-charges + contract-note honesty lives in the
+ * card footer; follow-up chips route to contract notes or raise-ticket.
  *
  * The fetch lives here (not a separate datacards client) so
  * brokerageCluster.ts stays a pure, dependency-free domain module.
@@ -74,13 +73,18 @@ const brokerage: DataFlowDescriptor = {
   hideSticker: true,
   keywords: /brokerage|my charges|my fees|rate card|slab/i,
   sticker: { icon: TagIcon, tint: 'rose' },
-  intro: "Here's what you pay to trade — your brokerage plan.",
+  intro: "Here's your brokerage plan — tap a segment to expand.",
   narration: ['Fetching your plan…'],
   fetch: fetchBrokerage,
   Card: BrokerageCard,
   emptyLine: 'No brokerage plan found on your account',
   errorNoun: 'your brokerage plan',
-  followup: { text: "Want a specific trade's charges?", linkLabel: 'Tell me.' },
+  followup: {
+    chips: [
+      { label: 'Get my contract note', action: 'startFlow', flowKey: 'contract-notes' },
+      { label: 'Raise a ticket', emoji: '🎫', action: 'raiseTicket' },
+    ],
+  },
   helpKind: 'brokerage',
 }
 

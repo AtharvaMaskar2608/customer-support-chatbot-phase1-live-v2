@@ -67,14 +67,35 @@ export interface DataFlowDescriptor {
   emptyLine: string
   /** Noun for error copy, e.g. "your holdings". */
   errorNoun: string
-  /** Follow-up under the card ("Tap any holding… · Something look off?"),
-   *  or null for none. */
-  followup: { text: string; linkLabel: string } | null
+  /** Follow-up under the card: text·help link (holdings/money), chip pills
+   *  (brokerage — CHO-259), or null for none. */
+  followup: DataFollowupSpec | null
   /** When true the card's follow-up offers a one-tap "Refresh prices" action
    *  that re-runs the flow, appending a fresh card below (CHO-248 — holdings). */
   refreshable?: boolean
   /** Which help copy the follow-up link opens. */
   helpKind: HelpKind
+}
+
+/** One pill under a data card (CHO-259 brokerage chips). */
+export interface DataFollowupChip {
+  label: string
+  /** Optional leading emoji rendered on the chip (e.g. ticket). */
+  emoji?: string
+  action: 'startFlow' | 'raiseTicket'
+  /** Required when action is `startFlow` — a file-flow key, e.g. "contract-notes". */
+  flowKey?: string
+}
+
+/** Text·help (existing) or chip row (additive for brokerage). */
+export type DataFollowupSpec =
+  | { text: string; linkLabel: string }
+  | { chips: DataFollowupChip[] }
+
+export function isChipFollowup(
+  followup: DataFollowupSpec,
+): followup is { chips: DataFollowupChip[] } {
+  return 'chips' in followup
 }
 
 export type AnyFlowDescriptor = FlowDescriptor | DataFlowDescriptor

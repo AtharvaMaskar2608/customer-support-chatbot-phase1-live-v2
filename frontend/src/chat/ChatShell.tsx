@@ -3,7 +3,13 @@ import { ArrowUpIcon } from '../icons'
 import { hasCredentials, type SessionContext } from '../session'
 import { getFlow, matchFlow } from '../flow/registry'
 import { getDataFlow, matchDataFlow } from '../flow/dataRegistry'
-import { isDataFlow, type AnyFlowDescriptor, type DataFlowDescriptor } from '../flow/dataflow'
+import {
+  isChipFollowup,
+  isDataFlow,
+  type AnyFlowDescriptor,
+  type DataFlowDescriptor,
+  type DataFollowupChip,
+} from '../flow/dataflow'
 import { submitReport, downloadReportFile, type FileInfo, type ReportResult } from '../flow/api'
 import { handleAuthExpired, sendFileToHost } from '../bridge'
 import { editSlot, fillSlot, lockRun, startRun, type FlowRun } from '../flow/engine'
@@ -36,7 +42,12 @@ import { FlowCard } from './FlowCard'
 import { NotesList, ChangeDatesButton } from './NotesList'
 import { Typing, NarratePill } from './Indicators'
 import { EmailCard, FileCard, HelpCard, TicketCard } from './ResultCards'
-import { DataCardFrame, DataFollowup, EmptyCardLine } from './datacards/primitives'
+import {
+  DataCardFrame,
+  DataFollowup,
+  DataFollowupChips,
+  EmptyCardLine,
+} from './datacards/primitives'
 import { RichText } from './RichText'
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
@@ -670,6 +681,15 @@ export function ChatShell({
     user('Resend it')
     botThen(() => bot('Resent — check again in a minute.'))
   }
+  /** Follow-up chip → start a file flow (CHO-259: contract notes from brokerage). */
+  function handleFollowupStartFlow(flowKey: string, label: string) {
+    engage()
+    user(label)
+    const descriptor = getFlow(flowKey)
+    if (!descriptor) return
+    botThen(() => runFlowBody(descriptor))
+  }
+
   /** Help-card escalation (CHO-218): a REAL Freshdesk ticket via
    *  POST /api/ticket. Busy pill while in flight; on failure a graceful
    *  line — the help card stays on screen, so the action remains available. */
@@ -739,6 +759,7 @@ export function ChatShell({
               onAdjustRerun={handleAdjustRerun}
               onResend={handleResend}
               onRaiseTicket={handleRaiseTicket}
+              onStartFlow={handleFollowupStartFlow}
               onNoteTap={handleNoteTap}
               onChangeDates={handleChangeDates}
               onRate={handleRate}
@@ -759,6 +780,21 @@ export function ChatShell({
 
 /* ── one message, dispatched by kind ──────────────────────────────────── */
 
+function dispatchFollowupChip(
+  chip: DataFollowupChip | undefined,
+  onStartFlow: (flowKey: string, label: string) => void,
+  onRaiseTicket: () => void,
+) {
+  if (!chip) return
+  if (chip.action === 'raiseTicket') {
+    onRaiseTicket()
+    return
+  }
+  if (chip.action === 'startFlow' && chip.flowKey) {
+    onStartFlow(chip.flowKey, chip.label)
+  }
+}
+
 function MessageView({
   message,
   session,
@@ -773,6 +809,7 @@ function MessageView({
   onAdjustRerun,
   onResend,
   onRaiseTicket,
+  onStartFlow,
   onNoteTap,
   onChangeDates,
   onRate,
@@ -790,6 +827,7 @@ function MessageView({
   onAdjustRerun: (flowKey: string, values: FilledValues) => void
   onResend: () => void
   onRaiseTicket: () => void
+  onStartFlow: (flowKey: string, label: string) => void
   onNoteTap: (flowMsgId: string, downloadEndpoint: string, note: ClientNote) => void
   onChangeDates: (flowMsgId: string) => void
   onRate: (msgId: string, rating: FeedbackRating) => void
@@ -909,6 +947,15 @@ function MessageView({
     case 'dataFollowup': {
       const descriptor = getDataFlow(m.flowKey)
       if (!descriptor?.followup) return null
+      if (isChipFollowup(descriptor.followup)) {
+        const { chips } = descriptor.followup
+        return (
+          <DataFollowupChips
+            chips={chips}
+            onChip={(index) => dispatchFollowupChip(chips[index], onStartFlow, onRaiseTicket)}
+          />
+        )
+      }
       return (
         <DataFollowup
           text={descriptor.followup.text}

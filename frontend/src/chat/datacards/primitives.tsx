@@ -292,3 +292,30 @@ export function DataFollowup({
     </div>
   )
 }
+
+const CHIP_PILL =
+  'inline-flex w-fit items-center gap-1.5 rounded-full border-[1.5px] border-zinc-200 bg-white px-3.5 py-1.5 text-[13px] font-semibold text-accent transition-colors hover:border-accent-soft hover:bg-accent-tint dark:border-zinc-700 dark:bg-zinc-900 dark:text-accent-soft dark:hover:bg-accent/15'
+
+/** Pill chip row under a data card (CHO-259 brokerage follow-ups). */
+export function DataFollowupChips({
+  chips,
+  onChip,
+}: Readonly<{
+  chips: ReadonlyArray<{ label: string; emoji?: string }>
+  onChip: (index: number) => void
+}>) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {chips.map((chip, index) => (
+        <button
+          key={`${chip.label}-${index}`}
+          type="button"
+          onClick={() => onChip(index)}
+          className={CHIP_PILL}
+        >
+          {chip.emoji ? `${chip.emoji} ${chip.label}` : chip.label}
+        </button>
+      ))}
+    </div>
+  )
+}
