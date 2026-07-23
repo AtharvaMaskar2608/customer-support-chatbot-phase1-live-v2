@@ -98,6 +98,31 @@ def test_affirmative_without_a_prior_offer_is_not_user_initiated():
     assert not ticket_call_is_user_initiated(thread)
 
 
+@respx.mock
+def test_ticket_attaches_email_and_phone_from_profile(monkeypatch):
+    """CHO-245: when the Profile API yields a well-formed email + phone, they
+    ride on the Freshdesk requester fields alongside the client code."""
+    _fd_env(monkeypatch)
+    respx.post(config.upstream_profile_url()).mock(
+        return_value=httpx.Response(200, json={
+            "Status": "Success",
+            "Response": {
+                "FirstHolderName": "PRITAM WAVHAL",
+                "Email": "pritam@example.com",
+                "Mobile": "9876543210",
+            },
+        })
+    )
+    route = respx.post(f"{FD_ROOT}/tickets").mock(
+        return_value=httpx.Response(201, json={"id": 7551234, "status": 2})
+    )
+    asyncio.run(_run({"reason": "General Query"}, thread=_conversation_thread()))
+    sent = json.loads(route.calls.last.request.content)
+    assert sent["email"] == "pritam@example.com"
+    assert sent["phone"] == "9876543210"
+    assert sent["unique_external_id"] == CLIENT_CODE  # client code still the identity
+
+
 def _conversation_thread():
     """A conversation with tool internals that must NEVER reach the ticket."""
     return _thread([

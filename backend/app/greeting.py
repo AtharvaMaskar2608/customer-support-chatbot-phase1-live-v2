@@ -20,6 +20,7 @@ never the name.
 import datetime
 import json
 import logging
+import re
 import time
 from pathlib import Path
 
@@ -212,6 +213,67 @@ async def fetch_first_name(
     except Exception as exc:  # best-effort: a name must never break the chat
         logger.warning("agent name fetch failed error=%s", type(exc).__name__)
         return None
+
+
+# CHO-245: the client's email + phone for the support-ticket requester. The
+# upstream response's exact field names are NOT in our docs (only
+# FirstHolderName is documented), so candidate keys are tried and the value
+# shape validated — CONFIRM against a live profile response before trusting in
+# production; a missed key just leaves the ticket carrying the client code.
+_EMAIL_KEYS = (
+    "Email", "EmailId", "EmailID", "EmailAddress", "Email_Id", "MailId", "EMailId",
+)
+_PHONE_KEYS = (
+    "Mobile", "MobileNo", "MobileNumber", "MobileNo1", "Phone", "PhoneNo",
+    "PhoneNumber", "ContactNo", "ContactNumber",
+)
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_PHONE_RE = re.compile(r"^\+?\d[\d\s-]{7,}$")
+
+
+def _first_valid(profile: dict, keys: tuple[str, ...], pattern: re.Pattern) -> str | None:
+    for key in keys:
+        val = profile.get(key)
+        if isinstance(val, str) and pattern.match(val.strip()):
+            return val.strip()
+    return None
+
+
+async def fetch_contact_fields(
+    client: httpx.AsyncClient,
+    *,
+    sso_jwt: str,
+    session_id: str,
+    client_code: str,
+) -> dict[str, str]:
+    """The client's email + phone for the support-ticket requester (CHO-245),
+    from the Profile API. Best-effort and NEVER raises: returns {} on any
+    failure. Only well-formed values are returned, and the values are never
+    logged (same PII posture as the greeting route)."""
+    try:
+        started = time.perf_counter()
+        upstream = await _fetch_profile(
+            client, sso_jwt, session_id, client_code, started
+        )
+        if upstream is None or not 200 <= upstream.status_code < 300:
+            return {}
+        payload = upstream.json()
+        if not isinstance(payload, dict) or payload.get("Status") != "Success":
+            return {}
+        profile = payload.get("Response")
+        if not isinstance(profile, dict):
+            return {}
+        out: dict[str, str] = {}
+        email = _first_valid(profile, _EMAIL_KEYS, _EMAIL_RE)
+        if email:
+            out["email"] = email
+        phone = _first_valid(profile, _PHONE_KEYS, _PHONE_RE)
+        if phone:
+            out["phone"] = phone
+        return out
+    except Exception as exc:  # best-effort — a lookup must never fail a ticket
+        logger.warning("ticket contact fetch failed error=%s", type(exc).__name__)
+        return {}
 
 
 @router.get("/api/greeting")
