@@ -186,14 +186,14 @@ async def run_chat_stream(
     transport: any unexpected failure becomes a terminal error event."""
     terminal_emitted = False
     try:
-        # CHO-244: the whole turn is one DeepEval `agent` trace, stitched into a
-        # multi-turn thread by hashed session/client ids. `ctx` (credentials)
-        # rides in the closure — never an observed argument. No-op when tracing
-        # is off.
+        # CHO-261: the whole turn is one `agent` trace persisted to Postgres,
+        # stitched into a multi-turn thread by hashed session/client ids. `ctx`
+        # (credentials + pool) rides in the closure. No-op when tracing is off.
         async for chunk in tracing.observe_turn(
             message=message,
             session_id=ctx.session_id,
             client_code=ctx.client_code,
+            pool=ctx.pg_pool,
             run=lambda: _chat_events(
                 message=message, ctx=ctx, store=store, client=client
             ),
@@ -275,8 +275,8 @@ async def _chat_events(
         try:
             if client is None:
                 raise RuntimeError("anthropic client not configured")
-            # CHO-244: the streamed round is an `llm` span (model + token usage
-            # recorded via update_llm_span). `holder["final"]` carries the final
+            # CHO-261: the streamed round is an `llm` span (model + token usage,
+            # incl. the prompt-cache split). `holder["final"]` carries the final
             # message back — a generator can't return it. No-op when off.
             async for delta in tracing.observe_model_round(
                 user_input=message,

@@ -318,38 +318,23 @@ def anthropic_api_key() -> str | None:
     return _secret("ANTHROPIC_API_KEY")
 
 
-# --- DeepEval tracing (CHO-244) ----------------------------------------------
+# --- Agent tracing (CHO-261) -------------------------------------------------
 #
-# Observability is config-gated: with no CONFIDENT_API_KEY (and no explicit
-# DEEPEVAL_TRACING) tracing is entirely off — the observe wrappers pass through.
-# The key is a secret (env, or repo-root .env in dev; never logged). Environment
-# and sampling rate are plain env knobs.
-
-
-def confident_api_key() -> str | None:
-    """Confident AI key for exporting DeepEval traces (env, or repo-root .env).
-    None ⇒ tracing stays off. Never logged."""
-    return _secret("CONFIDENT_API_KEY")
-
-
-def deepeval_env() -> str:
-    """Trace environment tag (DEEPEVAL_ENV): development/staging/production."""
-    return os.environ.get("DEEPEVAL_ENV", "development")
-
-
-def deepeval_sampling_rate() -> float:
-    """Fraction of turns to trace (DEEPEVAL_SAMPLING_RATE, default 1.0)."""
-    try:
-        return float(os.environ.get("DEEPEVAL_SAMPLING_RATE", "1.0"))
-    except ValueError:
-        return 1.0
+# Self-hosted observability: each /api/chat turn is captured as an execution
+# graph and persisted to our OWN Postgres (agent_traces table) — no external
+# service, no data egress, no cost. On by default; disable with AGENT_TRACING=0.
+# Actual persistence also needs the KB/conversation DB pool at request time.
 
 
 def tracing_enabled() -> bool:
-    """Tracing is on when a Confident key is present, or DEEPEVAL_TRACING is
-    truthy (local-only collection without export)."""
-    if confident_api_key():
-        return True
-    return os.environ.get("DEEPEVAL_TRACING", "").strip().lower() in {
-        "1", "true", "yes", "on",
+    """Agent tracing on/off (AGENT_TRACING env, default on)."""
+    return os.environ.get("AGENT_TRACING", "1").strip().lower() not in {
+        "0", "false", "no", "off",
     }
+
+
+def tracing_salt() -> str:
+    """HMAC salt for pseudonymising the session id (a live FinX auth token) and
+    client code used as trace thread/user ids (TRACING_SALT env). It
+    pseudonymises the grouping key; it is not itself a secret."""
+    return os.environ.get("TRACING_SALT", "jini-tracing")
