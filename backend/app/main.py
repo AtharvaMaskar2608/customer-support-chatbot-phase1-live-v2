@@ -24,6 +24,7 @@ from app.report import router as report_router
 from app.reports.contract_notes import router as contract_notes_router
 from app.reports.ledger import router as ledger_router
 from app.reports.tax import router as tax_router
+from app.traces_router import router as traces_router
 from app.whats_new import router as whats_new_router
 
 logger = logging.getLogger(__name__)
@@ -109,6 +110,9 @@ def create_app() -> FastAPI:
     app.include_router(kb_router)
     # CHO-213 agentic loop: free text → tool-orchestrated SSE chat.
     app.include_router(chat_router)
+    # CHO-262 trace viewer dashboard: read-only, admin-token-gated API over the
+    # agent_traces table (disabled — 404 — unless TRACES_ADMIN_TOKEN is set).
+    app.include_router(traces_router)
     return app
 
 
