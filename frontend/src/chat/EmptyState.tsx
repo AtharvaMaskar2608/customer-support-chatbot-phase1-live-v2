@@ -70,7 +70,11 @@ export function EmptyState({
       onTransitionEnd={collapsing ? onCollapsed : undefined}
       className={[
         'overflow-hidden transition-all duration-300 ease-out',
-        collapsing ? 'max-h-0 -translate-y-1.5 opacity-0' : 'max-h-[640px] opacity-100',
+        // CHO-268: fill the scroll canvas so the ask-anything divider can sit
+        // just above the fixed composer (mt-auto), not mid-stack under chips.
+        collapsing
+          ? 'max-h-0 -translate-y-1.5 opacity-0'
+          : 'flex min-h-0 flex-1 flex-col opacity-100',
       ].join(' ')}
     >
       <section className="pt-1">
@@ -89,10 +93,20 @@ export function EmptyState({
       </section>
 
       {/* CHO-234: the "POPULAR RIGHT NOW" eyebrow was removed — the chips are
-          the standard entry points, not an editorialised trend list. */}
+          the standard entry points, not an editorialised trend list.
+          CHO-268: full wrap row (no pager). */}
       <section className="pt-6">
         <Stickers onPick={onPick} />
       </section>
+
+      {/* CHO-260 divider copy; CHO-268 pins it above the composer via mt-auto. */}
+      <div className="mt-auto pt-6 mb-2 flex items-center gap-3">
+        <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
+        <span className="shrink-0 text-sm text-zinc-500 dark:text-zinc-400">
+          or ask anything about FinX
+        </span>
+        <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
+      </div>
     </div>
   )
 }
