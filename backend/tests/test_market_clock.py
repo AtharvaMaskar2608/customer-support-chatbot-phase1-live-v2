@@ -454,6 +454,12 @@ def test_self_only_data_guardrail_is_in_the_frozen_instructions():
     assert "I can fetch reports only for your account." in PRIMED_INSTRUCTIONS
 
 
+def test_followup_reopens_the_seeded_form_rule_is_in_the_instructions():
+    """CHO-252: follow-ups (params from a prior flow event) re-open the seeded
+    form rather than executing the report tool directly."""
+    assert "FOLLOW-UPS re-open the form" in PRIMED_INSTRUCTIONS
+
+
 def test_snapshot_records_no_rendered_clock():
     assert "Right now it is 2:47 pm" not in snapshot_text()
 
