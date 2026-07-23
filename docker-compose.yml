@@ -14,14 +14,14 @@
 # forward to :8080; :8000 is exposed for direct debugging only.
 services:
   backend:
-    image: 829433345651.dkr.ecr.ap-south-1.amazonaws.com/customer-support-chatbot:backendv1.0.7
+    image: 829433345651.dkr.ecr.ap-south-1.amazonaws.com/customer-support-chatbot:backendv1.0.8
     env_file: .env                 # secrets: DATABASE_URL, ANTHROPIC_API_KEY, OPENAI_API_KEY, FRESHDESK_*, ...
     ports:
       - "8000:8000"
     restart: unless-stopped
 
   frontend:
-    image: 829433345651.dkr.ecr.ap-south-1.amazonaws.com/customer-support-chatbot:frontendv1.0.13
+    image: 829433345651.dkr.ecr.ap-south-1.amazonaws.com/customer-support-chatbot:frontendv1.0.14
     ports:
       - "8080:80"
     restart: unless-stopped

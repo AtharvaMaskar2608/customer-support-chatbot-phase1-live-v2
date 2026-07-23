@@ -32,7 +32,7 @@ router = APIRouter()
 
 class KbSearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=1000)
-    top_k: int = Field(default=5, ge=1, le=20)
+    top_k: int = Field(default=10, ge=1, le=20)
 
 
 async def run_kb_search(
