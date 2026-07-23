@@ -99,10 +99,15 @@ def _reminder_message(text: str) -> dict:
     return {"role": "user", "content": [{"type": "text", "text": text}]}
 
 
-def _block_to_dict(block: Any) -> dict:
-    """SDK content block → the wire-faithful plain dict the store persists."""
+def _block_to_dict(block: Any) -> dict | None:
+    """SDK content block → the plain dict the store persists.
+
+    Anthropic thinking blocks are intentionally dropped: they are not user-
+    facing output and must never be rendered back into the chat transcript.
+    """
     if isinstance(block, dict):
-        return block
+        btype = block.get("type")
+        return None if btype in {"thinking", "redacted_thinking"} else block
     btype = getattr(block, "type", None)
     if btype == "text":
         return {"type": "text", "text": block.text}
@@ -113,14 +118,8 @@ def _block_to_dict(block: Any) -> dict:
             "name": block.name,
             "input": block.input,
         }
-    if btype == "thinking":
-        return {
-            "type": "thinking",
-            "thinking": block.thinking,
-            "signature": block.signature,
-        }
-    if btype == "redacted_thinking":
-        return {"type": "redacted_thinking", "data": block.data}
+    if btype in {"thinking", "redacted_thinking"}:
+        return None
     dump = getattr(block, "model_dump", None)
     return dump(exclude_none=True) if callable(dump) else {"type": str(btype)}
 
@@ -295,7 +294,11 @@ async def _chat_events(
             return
         latency_ms = int((time.perf_counter() - started) * 1000)
 
-        content = [_block_to_dict(block) for block in (final.content or [])]
+        content = [
+            block_dict
+            for block in (final.content or [])
+            if (block_dict := _block_to_dict(block)) is not None
+        ]
         tool_uses = [b for b in content if b.get("type") == "tool_use"]
         stop_reason = getattr(final, "stop_reason", None)
         store.append_turn(
