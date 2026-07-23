@@ -464,6 +464,31 @@ def test_snapshot_records_no_rendered_clock():
     assert "Right now it is 2:47 pm" not in snapshot_text()
 
 
+def test_user_facing_voice_block_is_in_the_frozen_instructions():
+    """CHO-265: USER-FACING VOICE + banned categories ship in the cached prompt."""
+    assert "USER-FACING VOICE" in PRIMED_INSTRUCTIONS
+    for phrase in (
+        "knowledge base",
+        "search results",
+        "let me search",
+        "let me search more specifically",
+        "this is likely",
+        "based on what I found",
+        "That isn't covered in our support guides",
+        "NOT a global hedge",
+    ):
+        assert phrase in PRIMED_INSTRUCTIONS
+    assert "USER-FACING VOICE" in snapshot_text()
+    # scattered one-liner consolidated into the voice block
+    assert "Never narrate retrieval or internal steps" not in PRIMED_INSTRUCTIONS
+
+
+def test_cost_price_miss_few_shot_is_in_the_instructions():
+    """CHO-265: Jam-shaped miss → allowed phrasing + ticket ask, silent tool call."""
+    assert "update cost price for shares I bought outside FinX" in PRIMED_INSTRUCTIONS
+    assert "That isn't covered in our support guides" in PRIMED_INSTRUCTIONS
+
+
 # --- greeting selection (3.x) -------------------------------------------------
 
 

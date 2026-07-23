@@ -142,6 +142,20 @@ def test_zero_slot_tools_expose_no_parameters():
         assert by_name[name]["input_schema"]["properties"] == {}
 
 
+def test_search_knowledge_base_description_hides_mechanism_nouns():
+    """CHO-265: Anthropic-facing KB tool copy must not prime mechanism leaks."""
+    by_name = {s["name"]: s for s in agent_tools.tool_schemas()}
+    desc = by_name["search_knowledge_base"]["description"]
+    for banned in ("knowledge base", "search results", "Summarize the results"):
+        assert banned not in desc
+    assert "Answer the user directly" in desc
+    # internal tool name stays
+    assert by_name["search_knowledge_base"]["name"] == "search_knowledge_base"
+    brokerage = by_name["get_brokerage_rates"]["description"]
+    assert "prefer" not in brokerage.lower() or "prefer search" not in brokerage
+    assert "call search_knowledge_base instead" in brokerage
+
+
 # --- dispatch ----------------------------------------------------------------
 
 
