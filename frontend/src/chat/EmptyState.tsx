@@ -91,8 +91,17 @@ export function EmptyState({
       {/* CHO-234: the "POPULAR RIGHT NOW" eyebrow was removed — the chips are
           the standard entry points, not an editorialised trend list. */}
       <section className="pt-6">
-        <Stickers onPick={onPick} />
+        <Stickers onPick={onPick} paginate />
       </section>
+
+      {/* CHO-260: hairline divider signals open-ended chat below the chip pages. */}
+      <div className="mt-6 mb-2 flex items-center gap-3">
+        <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
+        <span className="shrink-0 text-sm text-zinc-500 dark:text-zinc-400">
+          or ask anything about FinX
+        </span>
+        <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
+      </div>
     </div>
   )
 }
