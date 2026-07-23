@@ -61,9 +61,6 @@ export type Message =
   | {
       id: string
       kind: 'email'
-      /** flowKey + values let "Adjust & run again" re-seed a fresh flow (CHO-249). */
-      flowKey: string
-      values: FilledValues
       noun: string
       emailMasked: string
       anchorSeq?: number
@@ -78,8 +75,12 @@ export type Message =
       downloadEndpoint: string
       notes: ClientNote[]
     }
-  /** A standalone "Change dates"/"Other dates" pill (single-note & empty/error). */
+  /** A standalone "Change dates"/"Other dates" pill (empty/error only). */
   | { id: string; kind: 'notesAction'; flowMsgId: string; label: string }
+  /** No-data report retry pill (CHO-256): "Try a different range" under a
+   *  no-data report line; re-seeds a fresh guided flow with the attempted
+   *  values so the user can adjust the range. */
+  | { id: string; kind: 'reportRetry'; flowKey: string; values: FilledValues }
   /** Actionable help card (options + raise-a-ticket). */
   | { id: string; kind: 'help'; helpKind: HelpKind }
   /** Ticket-confirmation card — always a REAL Freshdesk ticket id (CHO-218). */
