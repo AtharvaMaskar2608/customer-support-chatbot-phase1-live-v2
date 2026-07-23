@@ -60,6 +60,9 @@ async def lifespan(app: FastAPI):
         # pg_pool=None it runs memory-only (chat works, persistence off).
         app.state.conversation_store = ThreadStore(pool=app.state.pg_pool)
         await app.state.conversation_store.start()
+        # CHO-261: ensure the agent_traces table exists (guarded; no-op when
+        # tracing is disabled or the pool is unavailable).
+        await tracing.ensure_schema(app.state.pg_pool)
         try:
             yield
         finally:
@@ -76,8 +79,8 @@ def create_app() -> FastAPI:
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
 
-    # CHO-244: initialise DeepEval tracing once (config-gated + fault-isolated —
-    # a no-op with no CONFIDENT_API_KEY, and never raises into startup).
+    # CHO-261: initialise agent tracing once (config-gated + fault-isolated —
+    # a no-op when AGENT_TRACING is off, and never raises into startup).
     tracing.configure()
 
     app = FastAPI(title="Choice Jini backend", lifespan=lifespan)

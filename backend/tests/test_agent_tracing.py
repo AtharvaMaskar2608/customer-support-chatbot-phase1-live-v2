@@ -1,21 +1,15 @@
-"""DeepEval tracing (CHO-244): the mask, config gating, id hashing, and that
-the observe wrappers preserve behaviour (streamed + return values) whether
-tracing is off (pass-through) or on. Export is never exercised — hermetic.
+"""Self-hosted Postgres tracing (CHO-261): the mask, id hashing, config gating,
+and that the observe wrappers build the correct nested span tree and persist it
+via a FAKE pool (no real DB touched, no external service).
 """
 
 import asyncio
+import json
 
 from app.agent import tracing
 
 
-def _drain(agen):
-    async def go():
-        return [chunk async for chunk in agen]
-
-    return asyncio.run(go())
-
-
-# --- redact (the global mask) ------------------------------------------------
+# --- redact (the mask) -------------------------------------------------------
 
 _JWT = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJmYjFlNDk0YSJ9.AbC123deF456ghI789signature"
 
@@ -43,7 +37,7 @@ def test_redact_denylisted_keys_and_keeps_safe_ones():
     out = tracing.redact(data)
     assert out["authorization"] == tracing._REDACT
     assert out["sso_jwt"] == tracing._REDACT
-    assert out["segment"] == "Equity"  # safe key untouched
+    assert out["segment"] == "Equity"
     assert out["fromDate"] == "2026-07-01"
     assert out["nested"]["client_code"] == tracing._REDACT
     assert out["nested"]["top_k"] == 5
@@ -57,50 +51,40 @@ def test_redact_recurses_lists_and_passes_scalars():
     assert tracing.redact(None) is None
 
 
-# --- stable id (thread/user pseudonymisation) --------------------------------
+# --- stable id ---------------------------------------------------------------
 
 
 def test_stable_id_is_stable_hashed_and_not_raw():
-    sid = "chat-session-token"
+    sid = "01KY6Q3SKBGN502F6CDAZEGMER"
     first = tracing._stable_id(sid)
-    assert first == tracing._stable_id(sid)  # deterministic
+    assert first == tracing._stable_id(sid)
     assert first and sid not in first and len(first) == 16
     assert tracing._stable_id(None) is None
     assert tracing._stable_id("") is None
 
 
-# --- configure gating --------------------------------------------------------
+# --- config gating -----------------------------------------------------------
 
 
-def test_configure_noop_when_disabled(monkeypatch):
+def test_configure_reflects_flag(monkeypatch):
     monkeypatch.setattr("app.config.tracing_enabled", lambda: False)
-    tracing._ENABLED = False
     tracing.configure()
     assert tracing.enabled() is False
-
-
-def test_configure_enables_and_passes_mask(monkeypatch):
-    calls = {}
-
-    def fake_configure(**kwargs):
-        calls.update(kwargs)
-
     monkeypatch.setattr("app.config.tracing_enabled", lambda: True)
-    monkeypatch.setattr("app.config.confident_api_key", lambda: "test-key")
-    monkeypatch.setattr("app.config.deepeval_env", lambda: "staging")
-    monkeypatch.setattr("app.config.deepeval_sampling_rate", lambda: 0.5)
-    monkeypatch.setattr(tracing.trace_manager, "configure", fake_configure)
-    tracing._ENABLED = False
     tracing.configure()
     assert tracing.enabled() is True
-    assert calls["mask"] is tracing.redact
-    assert calls["tracing_enabled"] is True
-    assert calls["environment"] == "staging"
-    assert calls["sampling_rate"] == 0.5
-    tracing._ENABLED = False  # reset for other tests
+    tracing._ENABLED = False
 
 
-# --- fakes mirroring the loop's stream + dispatch ----------------------------
+# --- fakes -------------------------------------------------------------------
+
+
+class FakePool:
+    def __init__(self):
+        self.calls = []
+
+    async def execute(self, sql, *args):
+        self.calls.append((sql, args))
 
 
 class _FakeStream:
@@ -127,104 +111,163 @@ class _FakeStream:
 
 class _FinalMsg:
     model = "claude-haiku-4-5"
-    usage = type("U", (), {"input_tokens": 11, "output_tokens": 7})()
+    stop_reason = "end_turn"
+    usage = {
+        "input_tokens": 120,
+        "output_tokens": 18,
+        "cache_read_input_tokens": 100,
+        "cache_creation_input_tokens": 0,
+    }
 
 
 class _Outcome:
     is_error = False
     error_code = None
-    duration_ms = 3
+    duration_ms = 4
 
 
-# --- wrappers: behaviour identical whether tracing is off or on ---------------
+def _run(coro):
+    return asyncio.run(coro)
 
 
-def _run_turn_wrapper():
-    async def run():
-        yield "Hel"
-        yield "lo"
-
-    return _drain(
-        tracing.observe_turn(
-            message="hi", session_id="s1", client_code="c1", run=run
-        )
-    )
+# --- pass-through when disabled ---------------------------------------------
 
 
-def test_observe_turn_passthrough_when_off():
+def test_turn_passthrough_when_disabled():
     tracing._ENABLED = False
-    assert _run_turn_wrapper() == ["Hel", "lo"]
+
+    async def run():
+        yield "a"
+        yield "b"
+
+    async def go():
+        return [c async for c in tracing.observe_turn(
+            message="hi", session_id="s", client_code="c", pool=FakePool(), run=run
+        )]
+
+    assert _run(go()) == ["a", "b"]
 
 
-def test_observe_turn_streams_when_on():
-    tracing._ENABLED = True
+def test_tool_and_retrieval_passthrough_without_active_trace():
+    tracing._ENABLED = True  # enabled, but no observe_turn wrapping ⇒ no trace
     try:
-        assert _run_turn_wrapper() == ["Hel", "lo"]
+        async def tool_run():
+            return _Outcome()
+
+        async def kb_run():
+            return [{"question": "q", "answer": "a"}]
+
+        async def go():
+            o = await tracing.observe_tool(name="t", tool_input={}, run=tool_run)
+            r = await tracing.observe_retrieval(query="q", run=kb_run)
+            return o, r
+
+        outcome, results = _run(go())
+        assert isinstance(outcome, _Outcome)
+        assert results == [{"question": "q", "answer": "a"}]
     finally:
         tracing._ENABLED = False
 
 
-def _run_model_round():
-    holder: dict = {}
-    final = _FinalMsg()
+# --- the full tree: builds nested spans + persists --------------------------
 
-    def open_stream():
-        return _FakeStream(["a", "b", "c"], final)
 
-    deltas = _drain(
-        tracing.observe_model_round(
-            user_input="hi", open_stream=open_stream, holder=holder
+def _drive_full_turn(pool):
+    """A turn exercising llm → tool → retriever, like the real loop."""
+    async def run():
+        holder = {}
+        async for d in tracing.observe_model_round(
+            user_input="hi",
+            open_stream=lambda: _FakeStream(["Hel", "lo"], _FinalMsg()),
+            holder=holder,
+        ):
+            yield d
+
+        async def kb_run():
+            return [{"question": "Off-market?", "answer": "DIS transfer"}]
+
+        async def dispatch():
+            await tracing.observe_retrieval(query="transfer to demat", run=kb_run)
+            return _Outcome()
+
+        await tracing.observe_tool(
+            name="search_knowledge_base",
+            tool_input={"query": "transfer to demat"},
+            run=dispatch,
         )
-    )
-    return deltas, holder, final
+        yield "done"
+
+    async def go():
+        out = [c async for c in tracing.observe_turn(
+            message="how do I transfer to another demat?",
+            session_id="sess-123", client_code="X008593", pool=pool, run=run,
+        )]
+        pending = list(tracing._pending)
+        if pending:
+            await asyncio.gather(*pending)  # flush the fire-and-forget persist
+        return out
+
+    return _run(go())
 
 
-def test_observe_model_round_passthrough_streams_and_sets_holder():
-    tracing._ENABLED = False
-    deltas, holder, final = _run_model_round()
-    assert deltas == ["a", "b", "c"]
-    assert holder["final"] is final
-
-
-def test_observe_model_round_on_streams_and_sets_holder():
+def test_full_turn_builds_tree_and_persists():
     tracing._ENABLED = True
+    pool = FakePool()
     try:
-        deltas, holder, final = _run_model_round()
-        assert deltas == ["a", "b", "c"]
-        assert holder["final"] is final
+        out = _drive_full_turn(pool)
+        assert out == ["Hel", "lo", "done"]  # streaming preserved
+
+        inserts = [c for c in pool.calls if "INSERT INTO agent_traces" in c[0]]
+        assert len(inserts) == 1
+        args = inserts[0][1]
+        (thread_id, user_id, latency_ms, model, in_tok, out_tok, tools,
+         had_error, tin, tout, spans_json) = args
+
+        assert thread_id == tracing._stable_id("sess-123")  # hashed, not raw
+        assert "sess-123" != thread_id
+        assert model == "claude-haiku-4-5"
+        assert in_tok == 120 and out_tok == 18
+        assert tools == ["search_knowledge_base"]
+        assert had_error is False
+        assert tout == "Hello"  # trace output = joined llm text
+
+        spans = json.loads(spans_json)
+        by_type = {s["type"]: s for s in spans}
+        assert set(by_type) == {"agent", "llm", "tool", "retriever"}
+        agent, llm, tool, retr = (
+            by_type["agent"], by_type["llm"], by_type["tool"], by_type["retriever"]
+        )
+        # nesting: agent root, llm+tool under agent, retriever under the tool
+        assert agent["parent_id"] is None
+        assert llm["parent_id"] == agent["id"]
+        assert tool["parent_id"] == agent["id"]
+        assert retr["parent_id"] == tool["id"]
+        # llm carries model + token split (incl. cache tokens)
+        assert llm["metadata"]["cache_read_input_tokens"] == 100
+        # retriever carries the fused chunks + embedder
+        assert retr["metadata"]["retrieval_context"] == ["Off-market? — DIS transfer"]
+        assert retr["metadata"]["embedder"]
+        # tool input is present and its span records no error
+        assert tool["metadata"]["is_error"] is False
     finally:
         tracing._ENABLED = False
 
 
-def test_observe_tool_returns_outcome_both_modes():
-    outcome = _Outcome()
-
-    async def run():
-        return outcome
-
-    for enabled in (False, True):
-        tracing._ENABLED = enabled
-        try:
-            got = asyncio.run(
-                tracing.observe_tool(
-                    name="get_holdings", tool_input={"x": 1}, run=run
-                )
-            )
-            assert got is outcome
-        finally:
-            tracing._ENABLED = False
+# --- schema ------------------------------------------------------------------
 
 
-def test_observe_retrieval_returns_results_both_modes():
-    results = [{"question": "q", "answer": "a"}, {"question": "q2", "answer": "a2"}]
+def test_ensure_schema_creates_table_when_enabled():
+    tracing._ENABLED = True
+    pool = FakePool()
+    try:
+        _run(tracing.ensure_schema(pool))
+        assert any("CREATE TABLE" in c[0] for c in pool.calls)
+    finally:
+        tracing._ENABLED = False
 
-    async def run():
-        return results
 
-    for enabled in (False, True):
-        tracing._ENABLED = enabled
-        try:
-            got = asyncio.run(tracing.observe_retrieval(query="hi", run=run))
-            assert got == results
-        finally:
-            tracing._ENABLED = False
+def test_ensure_schema_noop_without_pool_or_disabled():
+    tracing._ENABLED = True
+    _run(tracing.ensure_schema(None))  # no pool → no crash
+    tracing._ENABLED = False
+    _run(tracing.ensure_schema(FakePool()))  # disabled → no-op
