@@ -30,7 +30,7 @@ from typing import Any, Awaitable, Callable
 
 from app.agent.ctx import ToolCtx, ToolError
 from app.agent.forms import run_open_report_form
-from app.agent.tickets import run_raise_ticket
+from app.agent.tickets import run_raise_ticket, ticket_call_is_user_initiated
 from app.columns import run_report_columns
 from app.data.brokerage import run_brokerage
 from app.data.holdings import run_holdings
@@ -450,6 +450,21 @@ async def dispatch_outcome(
     if tool is None:
         return DispatchOutcome(
             content=f"unknown tool: {name}", is_error=True, duration_ms=_ms()
+        )
+    # CHO-241: ticket creation is user-initiated only. Reject a model-emitted
+    # raise_support_ticket the user did not ask for (or accept) — the model must
+    # offer, not decide. The help-card /api/ticket path bypasses the dispatcher.
+    if name == "raise_support_ticket" and not ticket_call_is_user_initiated(
+        ctx.thread
+    ):
+        return DispatchOutcome(
+            content=(
+                "Do NOT raise a ticket unless the user explicitly asks to escalate "
+                "or accepts your offer. Instead ask 'Want me to raise a ticket so "
+                "the team can take this up?' and stop."
+            ),
+            is_error=True,
+            duration_ms=_ms(),
         )
     try:
         result = await tool.handler(tool_input, ctx)
