@@ -67,14 +67,25 @@ export function EmptyState({
 
   return (
     <div
-      onTransitionEnd={collapsing ? onCollapsed : undefined}
+      // Only max-height drives unmount — opacity/transform also fire
+      // transitionend under transition-all; gating keeps first-send collapse
+      // in sync with the height animation.
+      onTransitionEnd={
+        collapsing
+          ? (e) => {
+              if (e.propertyName === 'max-height') onCollapsed()
+            }
+          : undefined
+      }
       className={[
         'overflow-hidden transition-all duration-300 ease-out',
         // CHO-268: fill the scroll canvas so the ask-anything divider can sit
         // just above the fixed composer (mt-auto), not mid-stack under chips.
+        // Keep an explicit max-h while open so collapse can interpolate to
+        // max-h-0 (flex-1 alone → max-height: none, which will not animate).
         collapsing
           ? 'max-h-0 -translate-y-1.5 opacity-0'
-          : 'flex min-h-0 flex-1 flex-col opacity-100',
+          : 'flex min-h-0 max-h-[640px] flex-1 flex-col opacity-100',
       ].join(' ')}
     >
       <section className="pt-1">

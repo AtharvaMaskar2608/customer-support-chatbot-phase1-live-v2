@@ -31,7 +31,7 @@
 
 ### D2 — Divider stays in EmptyState; pin to bottom with flex
 
-**Choice:** Keep the hairline divider inside `EmptyState` (so it collapses with the landing). Make the empty-state root a `flex-1 flex-col` child of the `min-h-full` scroll column and put `mt-auto` on the divider so it sits at the bottom of the landing canvas — visually just above the fixed composer strip.
+**Choice:** Keep the hairline divider inside `EmptyState` (so it collapses with the landing). Make the empty-state root a `flex-1 flex-col` child of the `min-h-full` scroll column (still capped with `max-h-[640px]` so first-send collapse can interpolate to `max-h-0`) and put `mt-auto` on the divider so it sits at the bottom of the landing canvas — visually just above the fixed composer strip.
 
 **Screenshot grounding:** Jam red-box sits mid-screen under chips; product copy asks for “a little below just above the chat input.” Flex pin matches that without wiring phase into `ChatShell`.
 
@@ -46,7 +46,7 @@
 ## Risks / Trade-offs
 
 - **[Six chips taller than four + pager]** → Acceptable; reclaiming pager + mid-stack gap and pinning the divider should still fit the widget height used in Jam. If overflow appears on very short hosts, the scroll column already scrolls.
-- **[flex-1 + collapse transition]** → Expanded state uses `flex-1` instead of a fixed `max-h-[640px]`; collapse still uses `max-h-0` + opacity. Verify collapse animation still settles cleanly on Restart / first send.
+- **[flex-1 + collapse transition]** → Expanded state keeps both `flex-1` (divider pin) and `max-h-[640px]` (animatable cap). Collapse still uses `max-h-0` + opacity; `onTransitionEnd` gates on `max-height` so opacity/transform do not unmount early.
 - **[origin/main may lag CHO-260]** → Branch from the CHO-260 merge commit; PR targets `main` once 260 is present (or nets to all-chips + bottom divider if 260 lands in the same window).
 
 ## Migration Plan
