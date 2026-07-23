@@ -40,6 +40,7 @@ from app.agent import caps as agent_caps
 from app.agent import prompt as agent_prompt
 from app.agent import tickets as agent_tickets
 from app.agent import tools as agent_tools
+from app.agent import tracing
 from app.agent.ctx import CODE_AUTH_EXPIRED, ToolCtx
 from app.agent.store import ThreadStore
 
@@ -185,8 +186,17 @@ async def run_chat_stream(
     transport: any unexpected failure becomes a terminal error event."""
     terminal_emitted = False
     try:
-        async for chunk in _chat_events(
-            message=message, ctx=ctx, store=store, client=client
+        # CHO-244: the whole turn is one DeepEval `agent` trace, stitched into a
+        # multi-turn thread by hashed session/client ids. `ctx` (credentials)
+        # rides in the closure — never an observed argument. No-op when tracing
+        # is off.
+        async for chunk in tracing.observe_turn(
+            message=message,
+            session_id=ctx.session_id,
+            client_code=ctx.client_code,
+            run=lambda: _chat_events(
+                message=message, ctx=ctx, store=store, client=client
+            ),
         ):
             if chunk.startswith("event: done") or chunk.startswith(
                 "event: error"
@@ -261,14 +271,20 @@ async def _chat_events(
             kwargs["tool_choice"] = {"type": "none"}
 
         started = time.perf_counter()
+        holder: dict = {}
         try:
             if client is None:
                 raise RuntimeError("anthropic client not configured")
-            async with client.messages.stream(**kwargs) as stream:
-                async for delta in stream.text_stream:
-                    if delta:
-                        yield _sse("text", {"delta": delta})
-                final = await stream.get_final_message()
+            # CHO-244: the streamed round is an `llm` span (model + token usage
+            # recorded via update_llm_span). `holder["final"]` carries the final
+            # message back — a generator can't return it. No-op when off.
+            async for delta in tracing.observe_model_round(
+                user_input=message,
+                open_stream=lambda: client.messages.stream(**kwargs),
+                holder=holder,
+            ):
+                yield _sse("text", {"delta": delta})
+            final = holder["final"]
         except Exception as exc:
             # SDK retries already happened; the agent is unavailable for this
             # turn. Existing guided flows are unaffected.
@@ -305,10 +321,19 @@ async def _chat_events(
             # Parallel tool_use blocks execute concurrently; all results are
             # answered in ONE user message on the wire (consecutive
             # tool_result turns merge in thread.messages()).
+            # CHO-244: each dispatch is a `tool` span (name + masked input +
+            # error/latency). `ctx` rides in the closure; `b=block` binds per
+            # iteration. No-op when tracing is off.
             outcomes = await asyncio.gather(
                 *(
-                    agent_tools.dispatch_outcome(
-                        block["name"], block.get("input") or {}, ctx
+                    tracing.observe_tool(
+                        name=block["name"],
+                        tool_input=block.get("input") or {},
+                        run=(
+                            lambda b=block: agent_tools.dispatch_outcome(
+                                b["name"], b.get("input") or {}, ctx
+                            )
+                        ),
                     )
                     for block in tool_uses
                 )
