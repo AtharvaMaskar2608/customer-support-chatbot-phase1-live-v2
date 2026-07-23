@@ -11,6 +11,7 @@ import httpx
 from fastapi import FastAPI
 
 from app import config
+from app.agent import tracing
 from app.agent.router import router as chat_router
 from app.agent.store import ThreadStore
 from app.data.brokerage import router as brokerage_router
@@ -74,6 +75,10 @@ def create_app() -> FastAPI:
     # report artifacts — silence them so no URL or credential reaches the logs.
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+    # CHO-244: initialise DeepEval tracing once (config-gated + fault-isolated —
+    # a no-op with no CONFIDENT_API_KEY, and never raises into startup).
+    tracing.configure()
 
     app = FastAPI(title="Choice Jini backend", lifespan=lifespan)
 

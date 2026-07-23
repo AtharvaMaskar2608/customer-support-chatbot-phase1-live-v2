@@ -21,6 +21,7 @@ from app.agent.ctx import (
     ToolError,
     parse_params,
 )
+from app.agent import tracing
 from app.kb.embed import embed_query
 from app.kb.search import hybrid_search
 
@@ -68,7 +69,13 @@ async def run_kb_search(
     started = time.monotonic()
     embedding = await embed_query(ctx.http_client, query)
     try:
-        results = await hybrid_search(ctx.pg_pool, query, embedding, params.top_k)
+        # CHO-244: a `retriever` span carrying the fused chunks as
+        # retrieval_context (RAG metrics). `pg_pool` rides in the closure; the
+        # query is masked. No-op when tracing is off.
+        results = await tracing.observe_retrieval(
+            query=query,
+            run=lambda: hybrid_search(ctx.pg_pool, query, embedding, params.top_k),
+        )
     except Exception:
         logger.exception("kb search failed (len=%s)", len(query))
         return ToolError(
