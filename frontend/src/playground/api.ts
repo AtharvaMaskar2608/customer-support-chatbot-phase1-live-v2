@@ -149,13 +149,19 @@ export async function streamPlaygroundChat(
       }
       case 'done': {
         sawTerminal = true
-        handlers.onDone(
-          (rec?.thread as {
-            taskTurns: number
-            sessionTurns: number
-            lastSeq: number
-          }) ?? { taskTurns: 0, sessionTurns: 0, lastSeq: 0 },
-        )
+        const thread =
+          rec?.thread && typeof rec.thread === 'object'
+            ? (rec.thread as Record<string, unknown>)
+            : {}
+        const num = (v: unknown) =>
+          typeof v === 'number' && Number.isFinite(v) ? v : 0
+        handlers.onDone({
+          thread: {
+            taskTurns: num(thread.taskTurns),
+            sessionTurns: num(thread.sessionTurns),
+            lastSeq: num(thread.lastSeq),
+          },
+        })
         return true
       }
       case 'error': {
