@@ -1,14 +1,25 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 // CHO-229: used only by the parked Header — restore alongside it.
 // import { BackIcon, SparkleIcon } from './icons'
 // CHO-229: used only by the parked Header — restore alongside it.
 // import { postCloseToHost } from './embed'
-import { getSessionContext, hasCredentials } from './session'
+import { getSessionContext, hasCredentials, type SessionContext } from './session'
 import { useGreeting } from './useGreeting'
 import { useWhatsNew } from './useWhatsNew'
 import { WhatsNewModal } from './WhatsNewModal'
 import { authHeaders } from './chat/agent'
 import { ChatShell } from './chat/ChatShell'
+
+/** Fire-and-forget blank slate for the agent short-term-memory thread.
+ *  Failed resets never block the UI (next message may continue the old
+ *  thread — same degradation as CHO-216). */
+function resetAgentThread(session: SessionContext) {
+  if (!hasCredentials(session)) return
+  void fetch('/api/chat/reset', {
+    method: 'POST',
+    headers: authHeaders(session),
+  }).catch(() => {})
+}
 
 // ===== CHO-229 — HEADER PARKED (do not delete) — replaced by FloatingControls =====
 /*
@@ -149,11 +160,16 @@ export default function App() {
   const whatsNew = useWhatsNew()
   const [whatsNewOpen, setWhatsNewOpen] = useState(false)
 
-  // CHO-216: conversation state drives the header pill; Restart bumps the
-  // shell key (full remount = every message/stream/ref resets by
-  // construction) and asks the backend for a fresh agent thread.
+  // CHO-216 / CHO-273: conversation state drives the header pill. Main Menu
+  // remounts the shell (blank UI) and both cold open + Main Menu request a
+  // fresh agent thread so an 8h FinX session never rehydrates rotten STM.
   const [engaged, setEngaged] = useState(false)
   const [shellKey, setShellKey] = useState(0)
+
+  useEffect(() => {
+    // Cold load lands on main menu — start with no memory (CHO-273).
+    resetAgentThread(session)
+  }, [session])
 
   function closeWhatsNew() {
     whatsNew.markSeen()
@@ -163,14 +179,8 @@ export default function App() {
   function handleRestart() {
     setEngaged(false)
     setShellKey((k) => k + 1)
-    if (hasCredentials(session)) {
-      // Fire-and-forget: the home screen appears immediately; a failed reset
-      // degrades to the next message continuing the old thread — never blocks.
-      void fetch('/api/chat/reset', {
-        method: 'POST',
-        headers: authHeaders(session),
-      }).catch(() => {})
-    }
+    // Main Menu pill — same blank-slate thread as cold load (CHO-216/273).
+    resetAgentThread(session)
   }
 
   return (
