@@ -175,6 +175,7 @@ def test_tool_and_retrieval_passthrough_without_active_trace():
 def _drive_full_turn(pool):
     """A turn exercising llm → tool → retriever, like the real loop."""
     async def run():
+        tracing.bind_conversation_thread("conv-uuid-1")
         holder = {}
         async for d in tracing.observe_model_round(
             user_input="hi",
@@ -223,8 +224,10 @@ def test_full_turn_builds_tree_and_persists():
         (thread_id, user_id, latency_ms, model, in_tok, out_tok, tools,
          had_error, tin, tout, spans_json) = args
 
-        assert thread_id == tracing._stable_id("sess-123")  # hashed, not raw
+        assert thread_id == "conv-uuid-1"  # conversation Thread.id (CHO-275)
+        assert user_id == tracing._stable_id("X008593")  # hashed client code
         assert "sess-123" != thread_id
+        assert "X008593" != user_id
         assert model == "claude-haiku-4-5"
         assert in_tok == 120 and out_tok == 18
         assert tools == ["search_knowledge_base"]

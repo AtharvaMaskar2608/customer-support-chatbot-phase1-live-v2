@@ -11,6 +11,15 @@ export function fmtInt(n: number | null | undefined): string {
   return n.toLocaleString('en-US')
 }
 
+/** Estimated INR cost — Indian digit grouping, e.g. ₹0.12 / ₹1,234.56. */
+export function fmtInr(n: number | null | undefined): string {
+  if (n == null || Number.isNaN(n)) return '—'
+  return `₹${n.toLocaleString('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`
+}
+
 export function fmtDateTime(iso: string | null | undefined): string {
   if (!iso) return '—'
   const d = new Date(iso)

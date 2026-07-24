@@ -131,10 +131,13 @@ def test_list_traces_shape_and_total(app_no_db, monkeypatch):
     assert set(first) == {
         "id", "created_at", "thread_id", "user_id", "model",
         "input_tokens", "output_tokens", "tools", "had_error",
-        "latency_ms", "input", "output",
+        "latency_ms", "input", "output", "cost_inr",
     }
     # the list view is light — spans are NOT included
     assert "spans" not in first
+    # Haiku: 120 in + 18 out → estimated INR at FX 96.46
+    assert first["cost_inr"] is not None
+    assert first["cost_inr"] > 0
 
 
 def test_list_traces_filters_reach_sql(app_no_db, monkeypatch):
@@ -231,6 +234,7 @@ def test_get_trace_404_when_missing(app_no_db, monkeypatch):
 
 def test_list_threads_rollup_shape(app_no_db, monkeypatch):
     monkeypatch.setattr("app.config.traces_admin_token", lambda: TOKEN)
+    monkeypatch.setattr("app.config.trace_cost_usd_to_inr", lambda: 96.46)
     grouped = [
         {
             "thread_id": "abc123",
@@ -240,7 +244,31 @@ def test_list_threads_rollup_shape(app_no_db, monkeypatch):
             "had_error": False,
         }
     ]
-    pool = FakePool(fetch=[grouped], fetchval=[1])
+    # Second fetch: per-trace rows for cost rollup (CHO-275)
+    detail = [
+        {
+            "thread_id": "abc123",
+            "model": "claude-haiku-4-5",
+            "input_tokens": 120,
+            "output_tokens": 18,
+            "spans": None,
+        },
+        {
+            "thread_id": "abc123",
+            "model": "claude-haiku-4-5",
+            "input_tokens": 120,
+            "output_tokens": 18,
+            "spans": None,
+        },
+        {
+            "thread_id": "abc123",
+            "model": "claude-haiku-4-5",
+            "input_tokens": 120,
+            "output_tokens": 18,
+            "spans": None,
+        },
+    ]
+    pool = FakePool(fetch=[grouped, detail], fetchval=[1])
     with _client_with(app_no_db, pool=pool) as client:
         resp = client.get("/api/threads", headers={"X-Traces-Token": TOKEN})
     assert resp.status_code == 200
@@ -248,9 +276,11 @@ def test_list_threads_rollup_shape(app_no_db, monkeypatch):
     assert body["total"] == 1
     t = body["threads"][0]
     assert set(t) == {
-        "thread_id", "turns", "last_at", "total_input_tokens", "had_error"
+        "thread_id", "turns", "last_at", "total_input_tokens", "had_error",
+        "total_cost_inr",
     }
     assert t["turns"] == 3 and t["total_input_tokens"] == 360
+    assert t["total_cost_inr"] is not None and t["total_cost_inr"] > 0
 
 
 def test_get_thread_orders_and_includes_spans(app_no_db, monkeypatch):

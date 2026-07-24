@@ -369,3 +369,20 @@ def playground_token() -> str | None:
     (PLAYGROUND_TOKEN env, or repo-root .env in dev). None => disabled
     (endpoints 404). Never logged."""
     return _secret("PLAYGROUND_TOKEN")
+
+
+# --- Trace cost estimates (CHO-275) -----------------------------------------
+#
+# Operator dashboard shows estimated Anthropic spend in INR. Pure token math
+# × list USD rates × FX — not a live billing API. Override FX via env.
+
+
+def trace_cost_usd_to_inr() -> float:
+    """INR per 1 USD for trace cost display (TRACE_COST_USD_TO_INR, default
+    96.46). Invalid / missing values fall back to the default."""
+    raw = os.environ.get("TRACE_COST_USD_TO_INR", "96.46").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return 96.46
+    return value if value > 0 else 96.46

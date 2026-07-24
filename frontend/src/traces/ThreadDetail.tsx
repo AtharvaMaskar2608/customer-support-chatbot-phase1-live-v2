@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react'
 import type { TraceDetail } from './api'
 import { getThread } from './api'
-import { fmtDateTime, fmtInt, fmtMs } from './format'
+import { fmtDateTime, fmtInt, fmtInr, fmtMs } from './format'
 import { SpanTree } from './SpanTree'
 import { TokenTrend } from './TokenTrend'
 import { Chip, Empty, ErrorBadge, ErrorNote, Spinner } from './ui'
@@ -46,6 +46,11 @@ export function ThreadDetail({
   }, [token, threadId, onError])
 
   const totalIn = turns.reduce((sum, t) => sum + (t.input_tokens ?? 0), 0)
+  const totalCost = turns.reduce(
+    (sum, t) => sum + (t.cost_inr != null ? t.cost_inr : 0),
+    0,
+  )
+  const hasCost = turns.some((t) => t.cost_inr != null)
   const anyError = turns.some((t) => t.had_error)
 
   return (
@@ -74,6 +79,11 @@ export function ThreadDetail({
           <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">
             <Chip>{fmtInt(turns.length)} turns</Chip>
             <Chip>{fmtInt(totalIn)} input tokens</Chip>
+            {hasCost && (
+              <Chip title="Estimated from tokens × Anthropic list rates">
+                est. {fmtInr(totalCost)}
+              </Chip>
+            )}
           </div>
 
           <TokenTrend traces={turns} onSelect={onOpenTrace} />
@@ -121,6 +131,14 @@ function Turn({
         </button>
         <div className="flex shrink-0 items-center gap-1.5 text-[11px] text-zinc-400">
           <span className="tabular-nums">{fmtInt(turn.input_tokens)} tok</span>
+          {turn.cost_inr != null && (
+            <span
+              className="tabular-nums"
+              title="Estimated from tokens × Anthropic list rates"
+            >
+              est. {fmtInr(turn.cost_inr)}
+            </span>
+          )}
           <span className="tabular-nums">{fmtMs(turn.latency_ms)}</span>
           <button
             type="button"

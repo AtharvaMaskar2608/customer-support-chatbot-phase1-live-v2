@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import type { TraceFilters, TraceListItem } from './api'
 import { listTraces } from './api'
-import { fmtInt, fmtMs, fmtRelative } from './format'
+import { fmtInt, fmtInr, fmtMs, fmtRelative } from './format'
 import { Chip, Empty, ErrorBadge, ErrorNote, Pager, Spinner } from './ui'
 
 const PAGE = 50
@@ -98,6 +98,11 @@ export function TraceList({
                   <Chip>
                     {fmtInt(t.input_tokens)}→{fmtInt(t.output_tokens)} tok
                   </Chip>
+                  {t.cost_inr != null && (
+                    <Chip title="Estimated from tokens × Anthropic list rates">
+                      est. {fmtInr(t.cost_inr)}
+                    </Chip>
+                  )}
                   {t.tools.map((tool) => (
                     <Chip key={tool}>{tool}</Chip>
                   ))}

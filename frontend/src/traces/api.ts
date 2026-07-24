@@ -20,6 +20,8 @@ export type TraceListItem = {
   latency_ms: number | null
   input: string | null
   output: string | null
+  /** Estimated INR from tokens × list rates × FX (CHO-275). */
+  cost_inr: number | null
 }
 
 export type Span = {
@@ -42,6 +44,8 @@ export type Thread = {
   last_at: string
   total_input_tokens: number
   had_error: boolean
+  /** Sum of per-turn estimated INR costs (CHO-275). */
+  total_cost_inr: number | null
 }
 
 export type TraceFilters = {

@@ -288,18 +288,37 @@ def _schedule_persist(pool: Any, trace: _Trace) -> None:
 # --------------------------------------------------------------------------- #
 
 
+def bind_conversation_thread(thread_id: str | None) -> None:
+    """Point the in-flight trace at the conversation-store Thread.id (CHO-275).
+
+    Main Menu / cold-load ``reset_thread`` mints a new store id; traces that
+    previously hashed ``session_id`` kept rolling up after reset. Call this
+    right after ``store.get_thread`` so cost buckets match conversation STM.
+    No-op when tracing is off or no turn is active.
+    """
+    trace = _current_trace.get()
+    if trace is None or not thread_id:
+        return
+    trace.thread_id = thread_id
+
+
 async def observe_turn(
     *, message: str, session_id: str, client_code: str, pool: Any,
     run: Callable[[], AsyncIterator[str]],
 ) -> AsyncIterator[str]:
-    """agent root span for one /api/chat turn; stitches the multi-turn thread by
-    hashed session/client. Persists the assembled tree at turn end."""
+    """agent root span for one /api/chat turn. ``user_id`` is a hashed client
+    code; ``thread_id`` starts unset and is filled by
+    :func:`bind_conversation_thread` once the store thread is known (CHO-275).
+    Persists the assembled tree at turn end."""
     if not _ENABLED or pool is None:
         async for chunk in run():
             yield chunk
         return
+    # session_id kept on the signature for callers / future fallbacks; thread
+    # grouping uses the conversation Thread.id via bind_conversation_thread.
+    _ = session_id
     trace = _Trace(
-        thread_id=_stable_id(session_id),
+        thread_id=None,
         user_id=_stable_id(client_code),
         input=redact(message),
         start_ms=_now_ms(),

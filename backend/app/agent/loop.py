@@ -253,6 +253,9 @@ async def _chat_events(
     thread = await store.get_thread(
         store_session_id, client_code=ctx.client_code
     )
+    # CHO-275: align agent_traces.thread_id with conversation Thread.id so
+    # Main Menu / reset_thread starts a new cost bucket (not hashed session).
+    tracing.bind_conversation_thread(thread.id)
     # Conversation context for tools that need it (CHO-218): the ticket core
     # renders its transcript from ctx.thread — same live object, so turns
     # appended below are visible when the tool runs.

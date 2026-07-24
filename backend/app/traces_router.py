@@ -26,6 +26,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app import config
+from app.agent.trace_cost import cost_inr_from_row
 
 # --- auth + pool guards ------------------------------------------------------
 
@@ -94,7 +95,14 @@ def _parse_spans(value: Any) -> list:
 
 
 def _trace_dict(row: Any, *, spans: bool = False) -> dict:
-    """Shape a trace row for the API (spans included only on demand)."""
+    """Shape a trace row for the API (spans included only on demand).
+
+    ``cost_inr`` (CHO-275) is estimated at read time from span token usage when
+    spans are present on the row, else from top-level input/output totals.
+    """
+    parsed_spans = (
+        _parse_spans(row["spans"]) if "spans" in row.keys() else None
+    )
     out = {
         "id": row["id"],
         "created_at": row["created_at"],
@@ -108,9 +116,15 @@ def _trace_dict(row: Any, *, spans: bool = False) -> dict:
         "latency_ms": row["latency_ms"],
         "input": row["input"],
         "output": row["output"],
+        "cost_inr": cost_inr_from_row(
+            model=row["model"],
+            input_tokens=row["input_tokens"],
+            output_tokens=row["output_tokens"],
+            spans=parsed_spans,
+        ),
     }
     if spans:
-        out["spans"] = _parse_spans(row["spans"])
+        out["spans"] = parsed_spans if parsed_spans is not None else []
     return out
 
 
@@ -179,7 +193,7 @@ async def list_traces(
         f"SELECT count(*) FROM agent_traces{where}", *args
     )
     rows = await pool.fetch(
-        f"SELECT {_LIST_COLS} FROM agent_traces{where} "
+        f"SELECT {_LIST_COLS}, spans FROM agent_traces{where} "
         f"ORDER BY created_at DESC, id DESC "
         f"LIMIT ${len(args) + 1} OFFSET ${len(args) + 2}",
         *args,
@@ -230,6 +244,28 @@ async def list_threads(
         limit,
         offset,
     )
+    thread_ids = [r["thread_id"] for r in rows if r["thread_id"]]
+    cost_by_thread: dict[str, float] = {tid: 0.0 for tid in thread_ids}
+    has_cost: dict[str, bool] = {tid: False for tid in thread_ids}
+    if thread_ids:
+        detail_rows = await pool.fetch(
+            "SELECT thread_id, model, input_tokens, output_tokens, spans "
+            "FROM agent_traces WHERE thread_id = ANY($1::text[])",
+            thread_ids,
+        )
+        for dr in detail_rows:
+            tid = dr["thread_id"]
+            if tid not in cost_by_thread:
+                continue
+            cost = cost_inr_from_row(
+                model=dr["model"],
+                input_tokens=dr["input_tokens"],
+                output_tokens=dr["output_tokens"],
+                spans=_parse_spans(dr["spans"]),
+            )
+            if cost is not None:
+                cost_by_thread[tid] += cost
+                has_cost[tid] = True
     threads = [
         {
             "thread_id": r["thread_id"],
@@ -237,6 +273,11 @@ async def list_threads(
             "last_at": r["last_at"],
             "total_input_tokens": int(r["total_input_tokens"] or 0),
             "had_error": bool(r["had_error"]),
+            "total_cost_inr": (
+                round(cost_by_thread[r["thread_id"]], 4)
+                if has_cost.get(r["thread_id"])
+                else None
+            ),
         }
         for r in rows
     ]

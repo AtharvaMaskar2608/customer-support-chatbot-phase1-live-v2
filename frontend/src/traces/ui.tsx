@@ -56,9 +56,15 @@ export function ErrorBadge() {
   )
 }
 
-export function Chip({ children }: Readonly<{ children: ReactNode }>) {
+export function Chip({
+  children,
+  title,
+}: Readonly<{ children: ReactNode; title?: string }>) {
   return (
-    <span className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[11px] text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+    <span
+      title={title}
+      className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[11px] text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+    >
       {children}
     </span>
   )
