@@ -236,9 +236,12 @@ _TOOL_LIST = [
         name="list_contract_notes",
         description=(
             "List the client's contract notes (trade confirmations) over a "
-            "date range. ALWAYS call this first when the user wants a "
-            "contract note — it returns the note ids that "
-            "download_contract_note requires. Both dates are required."
+            "date range. Call ONLY when both fromDate and toDate are already "
+            "known from the user's words, a completed form, or an App event — "
+            "never invent dates. If either date is missing, call "
+            "open_report_form with flow=contract-notes instead; never ask for "
+            "a date range in a text question. Returns the note ids that "
+            "download_contract_note requires."
         ),
         schema={
             "type": "object",
