@@ -121,11 +121,11 @@ The system prompt SHALL constrain the agent to factual support answers: no inves
 - **THEN** the stream emits `error` `{"error": "AGENT_UNAVAILABLE"}` and existing guided flows remain unaffected
 
 ### Requirement: Configurable model and thinking
-The loop's model SHALL be selected by `AGENT_MODEL` (`claude-haiku-4-5` default, or `claude-sonnet-4-6`) and its reasoning by `AGENT_THINKING` (`off` default, or `minimal`), both env-overridable and read at call time. The thinking parameter SHALL be resolved per model: `off` omits the `thinking` parameter on both models; `minimal` maps to `{type:"enabled", budget_tokens:1024}` on `claude-haiku-4-5` (the API minimum) and to `{type:"adaptive"}` with `output_config.effort:"low"` on `claude-sonnet-4-6` (where `budget_tokens` is deprecated). No other thinking configuration SHALL be sent.
+The loop's model SHALL be selected by `AGENT_MODEL` (`claude-sonnet-4-6` default, or `claude-haiku-4-5`) and its reasoning by `AGENT_THINKING` (`off` default, or `minimal`), both env-overridable and read at call time. The thinking parameter SHALL be resolved per model: `off` omits the `thinking` parameter on both models; `minimal` maps to `{type:"enabled", budget_tokens:1024}` on `claude-haiku-4-5` (the API minimum) and to `{type:"adaptive"}` with `output_config.effort:"low"` on `claude-sonnet-4-6` (where `budget_tokens` is deprecated). No other thinking configuration SHALL be sent.
 
 #### Scenario: Default configuration
 - **WHEN** no agent env vars are set
-- **THEN** requests go to `claude-haiku-4-5` with no `thinking` parameter
+- **THEN** requests go to `claude-sonnet-4-6` with no `thinking` parameter
 
 #### Scenario: Sonnet with minimal thinking
 - **WHEN** `AGENT_MODEL=claude-sonnet-4-6` and `AGENT_THINKING=minimal`

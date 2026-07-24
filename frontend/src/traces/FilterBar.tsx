@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react'
 import type { TraceFilters } from './api'
 
-const MODELS = ['claude-haiku-4-5', 'claude-sonnet-4-6']
+const MODELS = ['claude-sonnet-4-6', 'claude-haiku-4-5']
 
 const inputCls =
   'w-full rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-sm text-zinc-800 placeholder:text-zinc-400 focus:border-accent focus:ring-2 focus:ring-accent/20 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100'
