@@ -16,5 +16,5 @@
 
 ## 4. Ship & sync
 
-- [ ] 4.1 Push branch + draft PR (`Fixes CHO-269`)
+- [x] 4.1 Push branch + draft PR (`Fixes CHO-269`) — https://github.com/AtharvaMaskar2608/customer-support-chatbot-phase1-live-v2/pull/67
 - [ ] 4.2 Linear summary when MCP/API available (blocked in this cloud run)
