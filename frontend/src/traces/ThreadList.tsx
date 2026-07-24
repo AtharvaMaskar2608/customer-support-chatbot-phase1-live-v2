@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import type { Thread } from './api'
 import { listThreads } from './api'
-import { fmtInt, fmtRelative } from './format'
+import { fmtInt, fmtInr, fmtRelative } from './format'
 import { Empty, ErrorBadge, ErrorNote, Pager, Spinner } from './ui'
 
 const PAGE = 50
@@ -85,6 +85,11 @@ export function ThreadList({
                 <div className="mt-1.5 flex items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
                   <span>{fmtInt(t.turns)} turns</span>
                   <span>{fmtInt(t.total_input_tokens)} in-tok</span>
+                  {t.total_cost_inr != null && (
+                    <span title="Estimated from tokens × Anthropic list rates">
+                      est. {fmtInr(t.total_cost_inr)}
+                    </span>
+                  )}
                   <span className="ml-auto">{fmtRelative(t.last_at)}</span>
                 </div>
               </button>

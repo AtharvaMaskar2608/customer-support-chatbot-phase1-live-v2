@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react'
 import type { TraceDetail as Trace } from './api'
 import { getTrace } from './api'
-import { fmtDateTime, fmtInt, fmtMs } from './format'
+import { fmtDateTime, fmtInt, fmtInr, fmtMs } from './format'
 import { SpanTree } from './SpanTree'
 import { Chip, ErrorBadge, ErrorNote, Spinner } from './ui'
 
@@ -66,6 +66,11 @@ export function TraceDetail({
             <Chip>
               {fmtInt(trace.input_tokens)}→{fmtInt(trace.output_tokens)} tok
             </Chip>
+            {trace.cost_inr != null && (
+              <Chip title="Estimated from tokens × Anthropic list rates">
+                est. {fmtInr(trace.cost_inr)}
+              </Chip>
+            )}
             {trace.thread_id && (
               <button
                 type="button"
