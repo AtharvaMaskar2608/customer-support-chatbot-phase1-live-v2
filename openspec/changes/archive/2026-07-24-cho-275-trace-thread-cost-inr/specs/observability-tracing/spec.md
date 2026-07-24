@@ -1,6 +1,6 @@
 # observability-tracing (CHO-275 delta)
 
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Trace thread_id matches conversation store
 Each persisted agent turn SHALL set `agent_traces.thread_id` to the active
