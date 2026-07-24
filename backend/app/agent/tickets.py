@@ -181,10 +181,16 @@ _AFFIRMATIVE = re.compile(
     r"please do|raise it|do that|yes please)\b",
     re.I,
 )
-# A prior assistant turn counts as an offer if it invited a ticket.
+# Prior assistant text counts as an escalation invite if it offered a ticket
+# OR (CHO-270) narrated raising one — so "Ok" after announce-then-act still
+# recovers into a real raise_support_ticket + ticket card. Preemptive raises
+# without an affirmative/explicit ask remain blocked.
 _OFFER_MARKERS = (
     "raise a ticket",
     "raise a support ticket",
+    "raising a ticket",
+    "raising a support ticket",
+    "let me raise",
     "raise one",
     "take this up",
 )
@@ -193,28 +199,41 @@ _OFFER_MARKERS = (
 def ticket_call_is_user_initiated(thread: Any) -> bool:
     """A model-emitted `raise_support_ticket` is honoured only when the user's
     LATEST message explicitly asks to escalate, OR is an affirmative reply to
-    the assistant's own escalation offer. Otherwise the model decided on its
-    own — reject it so it offers instead. The help-card `/api/ticket` path does
-    not go through the dispatcher, so it is never subject to this check."""
+    the assistant's own escalation invite in the preceding exchange. Otherwise
+    the model decided on its own — reject it so it offers instead. The help-card
+    `/api/ticket` path does not go through the dispatcher, so it is never
+    subject to this check.
+
+    CHO-270: affirmation looks at every consecutive assistant_text bubble since
+    the previous user message (not only the last one), and invite markers include
+    gerund/announce forms ("I'm raising a support ticket…") so Ok after a policy
+    slip still allows the tool — and the ticket artifact/card — to land.
+    """
     turns = getattr(thread, "turns", None) or []
     last_user: str | None = None
-    prev_assistant: str | None = None
+    # Assistant bubbles in the exchange immediately before the latest user turn
+    # (newest first while walking; order does not matter for marker matching).
+    recent_assistants: list[str] = []
     for turn in reversed(turns):
         if last_user is None:
             if turn.role == "user" and turn.kind == "user_text":
                 last_user = _turn_text(turn)
             continue
-        if turn.role == "assistant" and turn.kind == "assistant_text":
-            prev_assistant = _turn_text(turn)
+        if turn.role == "user" and turn.kind == "user_text":
             break
+        if turn.role == "assistant" and turn.kind == "assistant_text":
+            text = _turn_text(turn)
+            if text:
+                recent_assistants.append(text)
     if not last_user:
         return False
     if _ESCALATION_REQUEST.search(last_user):
         return True
-    if _AFFIRMATIVE.match(last_user) and prev_assistant:
-        low = prev_assistant.lower()
-        if any(marker in low for marker in _OFFER_MARKERS):
-            return True
+    if _AFFIRMATIVE.match(last_user) and recent_assistants:
+        for text in recent_assistants:
+            low = text.lower()
+            if any(marker in low for marker in _OFFER_MARKERS):
+                return True
     return False
 
 

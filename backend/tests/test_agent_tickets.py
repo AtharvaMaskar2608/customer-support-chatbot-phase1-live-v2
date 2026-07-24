@@ -98,6 +98,48 @@ def test_affirmative_without_a_prior_offer_is_not_user_initiated():
     assert not ticket_call_is_user_initiated(thread)
 
 
+def test_affirmative_after_raising_narration_is_user_initiated():
+    """CHO-270: gerund announce ("I'm raising…") must count as invite context
+    so Ok recovers into a real raise_support_ticket + ticket card."""
+    thread = _thread([
+        ("user", "user_text", _text("unauthorized trades on my account")),
+        ("assistant", "assistant_text", _text(
+            "I'm raising a support ticket now so our team can contact you."
+        )),
+        ("user", "user_text", _text("Ok")),
+    ])
+    assert ticket_call_is_user_initiated(thread)
+
+
+def test_affirmative_after_multi_bubble_announce_is_user_initiated():
+    """CHO-270 screenshot path: earlier 'Let me raise…' still counts when a
+    later 'I'm raising…' bubble is the immediate predecessor of Ok."""
+    thread = _thread([
+        ("user", "user_text", _text("fraud / unauthorized trades")),
+        ("assistant", "assistant_text", _text(
+            "I understand this is urgent. Let me raise a support ticket right "
+            "now so our team can contact you."
+        )),
+        ("assistant", "assistant_text", _text(
+            "I'm raising a support ticket now so our team can investigate."
+        )),
+        ("user", "user_text", _text("Ok")),
+    ])
+    assert ticket_call_is_user_initiated(thread)
+
+
+def test_affirmative_after_unrelated_assistant_text_is_not_user_initiated():
+    """Ok after a non-escalation reply must still be blocked (CHO-241)."""
+    thread = _thread([
+        ("user", "user_text", _text("what are the DP charges?")),
+        ("assistant", "assistant_text", _text(
+            "DP charges are billed quarterly as per the schedule."
+        )),
+        ("user", "user_text", _text("Ok")),
+    ])
+    assert not ticket_call_is_user_initiated(thread)
+
+
 @respx.mock
 def test_ticket_attaches_email_and_phone_from_profile(monkeypatch):
     """CHO-245: when the Profile API yields a well-formed email + phone, they

@@ -12,17 +12,17 @@ from app import config
 
 def test_agent_model_default(monkeypatch):
     monkeypatch.delenv("AGENT_MODEL", raising=False)
-    assert config.agent_model() == "claude-haiku-4-5"
+    assert config.agent_model() == "claude-sonnet-4-6"
 
 
 def test_agent_model_env_override(monkeypatch):
-    monkeypatch.setenv("AGENT_MODEL", "claude-sonnet-4-6")
-    assert config.agent_model() == "claude-sonnet-4-6"
+    monkeypatch.setenv("AGENT_MODEL", "claude-haiku-4-5")
+    assert config.agent_model() == "claude-haiku-4-5"
 
 
 def test_agent_model_unknown_falls_back_to_default(monkeypatch):
     monkeypatch.setenv("AGENT_MODEL", "claude-opus-4-8")  # not in the allowlist
-    assert config.agent_model() == "claude-haiku-4-5"
+    assert config.agent_model() == "claude-sonnet-4-6"
 
 
 def test_agent_thinking_default_and_override(monkeypatch):

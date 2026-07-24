@@ -243,7 +243,8 @@ def freshdesk_group_id() -> int:
 # (Haiku 4.5 still takes budget_tokens; Sonnet 4.6 deprecates it in favour of
 # adaptive + effort), so "minimal" cannot be one literal.
 
-AGENT_MODEL_DEFAULT = "claude-haiku-4-5"
+# CHO-270: default to Sonnet 4.6 with thinking off (smallest Sonnet config).
+AGENT_MODEL_DEFAULT = "claude-sonnet-4-6"
 AGENT_MODELS = ("claude-haiku-4-5", "claude-sonnet-4-6")
 AGENT_THINKING_MODES = ("off", "minimal")
 

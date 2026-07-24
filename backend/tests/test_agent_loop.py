@@ -37,7 +37,7 @@ class FakeMessage:
     def __init__(self, content, stop_reason="end_turn", deltas=None):
         self.content = content  # plain dict blocks — the loop accepts both
         self.stop_reason = stop_reason
-        self.model = "claude-haiku-4-5"
+        self.model = "claude-sonnet-4-6"
         self.usage = {"input_tokens": 11, "output_tokens": 7}
         if deltas is None:
             deltas = [b["text"] for b in content if b.get("type") == "text"]
@@ -180,7 +180,7 @@ def test_end_turn_streams_text_and_terminates(app):
         # one model call, correctly assembled
         assert len(fake.calls) == 1
         kwargs = fake.calls[0]
-        assert kwargs["model"] == "claude-haiku-4-5"
+        assert kwargs["model"] == "claude-sonnet-4-6"
         assert kwargs["max_tokens"] == 4096
         assert "thinking" not in kwargs  # AGENT_THINKING=off omits it
         assert kwargs["system"][0]["cache_control"] == {"type": "ephemeral"}
@@ -210,7 +210,7 @@ def test_end_turn_streams_text_and_terminates(app):
         thread = _get_thread(app)
         assert [t.kind for t in thread.turns] == ["user_text", "assistant_text"]
         meta = thread.turns[-1].meta
-        assert meta["model"] == "claude-haiku-4-5"
+        assert meta["model"] == "claude-sonnet-4-6"
         assert meta["stop_reason"] == "end_turn"
         assert meta["usage"] == {"input_tokens": 11, "output_tokens": 7}
         assert meta["latency_ms"] >= 0
