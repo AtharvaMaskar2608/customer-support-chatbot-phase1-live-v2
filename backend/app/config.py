@@ -355,3 +355,17 @@ def traces_admin_token() -> str | None:
     repo-root .env in dev). None => the dashboard is disabled (endpoints 404).
     Never logged."""
     return _secret("TRACES_ADMIN_TOKEN")
+
+
+# --- Prompt playground (CHO-272) --------------------------------------------
+#
+# Operator-only prompt editor + chat against the same agent tools. Gated by a
+# shared token (same posture as the trace viewer): UNSET ⇒ every
+# /api/playground* endpoint answers 404. Never logged.
+
+
+def playground_token() -> str | None:
+    """Shared operator token gating the prompt playground
+    (PLAYGROUND_TOKEN env, or repo-root .env in dev). None => disabled
+    (endpoints 404). Never logged."""
+    return _secret("PLAYGROUND_TOKEN")

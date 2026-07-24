@@ -4,8 +4,9 @@ import tailwindcss from '@tailwindcss/vite'
 import { fileURLToPath } from 'node:url'
 
 // https://vite.dev/config/
-// Two HTML entries share this config: the chat app (index.html) and the
-// admin-only trace viewer dashboard (traces.html, CHO-262). The framework-free
+// Two HTML entries share this config: the chat app (index.html), the
+// admin-only trace viewer dashboard (traces.html, CHO-262), and the
+// prompt playground (playground.html, CHO-272). The framework-free
 // corner widget builds from its own config (vite.widget.config.ts).
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -14,6 +15,7 @@ export default defineConfig({
       input: {
         main: fileURLToPath(new URL('./index.html', import.meta.url)),
         traces: fileURLToPath(new URL('./traces.html', import.meta.url)),
+        playground: fileURLToPath(new URL('./playground.html', import.meta.url)),
       },
     },
   },

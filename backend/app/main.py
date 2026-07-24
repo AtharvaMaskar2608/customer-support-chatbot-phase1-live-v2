@@ -25,6 +25,7 @@ from app.reports.contract_notes import router as contract_notes_router
 from app.reports.ledger import router as ledger_router
 from app.reports.tax import router as tax_router
 from app.traces_router import router as traces_router
+from app.playground.router import router as playground_router
 from app.whats_new import router as whats_new_router
 
 logger = logging.getLogger(__name__)
@@ -113,6 +114,9 @@ def create_app() -> FastAPI:
     # CHO-262 trace viewer dashboard: read-only, admin-token-gated API over the
     # agent_traces table (disabled — 404 — unless TRACES_ADMIN_TOKEN is set).
     app.include_router(traces_router)
+    # CHO-272 prompt playground: editable system/primed prompts + chat
+    # (disabled — 404 — unless PLAYGROUND_TOKEN is set). Does not alter /api/chat.
+    app.include_router(playground_router)
     return app
 
 

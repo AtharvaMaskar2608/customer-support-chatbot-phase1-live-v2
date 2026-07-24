@@ -304,16 +304,17 @@ ticket so the team can take this up?
 UNDERSTOOD = "Understood."
 
 
-def system_blocks() -> list[dict]:
-    """The `system` param: one frozen text block carrying the prompt-cache
-    breakpoint (caches the rendered tools + system prefix)."""
-    return [
-        {
-            "type": "text",
-            "text": SYSTEM_PROMPT,
-            "cache_control": {"type": "ephemeral"},
-        }
-    ]
+def system_blocks(*, override: str | None = None) -> list[dict]:
+    """The `system` param: one text block. Production passes no override and
+    keeps the prompt-cache breakpoint. Playground (CHO-272) may pass an
+    experimental string — no cache_control on drafts."""
+    block: dict = {
+        "type": "text",
+        "text": SYSTEM_PROMPT if override is None else override,
+    }
+    if override is None:
+        block["cache_control"] = {"type": "ephemeral"}
+    return [block]
 
 
 def _live_context(
@@ -333,7 +334,10 @@ def _live_context(
 
 
 def primed_messages(
-    now: datetime.datetime | None = None, first_name: str | None = None
+    now: datetime.datetime | None = None,
+    first_name: str | None = None,
+    *,
+    instructions_override: str | None = None,
 ) -> list[dict]:
     """The primed first exchange, prepended to the thread's messages at call
     time.
@@ -344,16 +348,25 @@ def primed_messages(
     deployed container runs on UTC, whose date rolls over at 05:30 IST. `now`
     stays injectable so tests can pin an instant; `first_name` (CHO-246) is
     volatile personalization and never enters the cached prefix.
+
+    `instructions_override` (CHO-272 playground) replaces the frozen primed
+    instructions and drops the cache breakpoint so drafts stay uncached.
     """
+    primed_block: dict = {
+        "type": "text",
+        "text": (
+            PRIMED_INSTRUCTIONS
+            if instructions_override is None
+            else instructions_override
+        ),
+    }
+    if instructions_override is None:
+        primed_block["cache_control"] = {"type": "ephemeral"}
     return [
         {
             "role": "user",
             "content": [
-                {
-                    "type": "text",
-                    "text": PRIMED_INSTRUCTIONS,
-                    "cache_control": {"type": "ephemeral"},
-                },
+                primed_block,
                 {"type": "text", "text": _live_context(now, first_name)},
             ],
         },
