@@ -438,9 +438,25 @@ def test_first_name_rides_the_volatile_block_not_the_cached_prefix():
     blocks = primed_messages(at(2026, 7, 20, 14, 47), first_name="Harsha")[0]["content"]
     assert "Harsha" not in blocks[0]["text"]
     assert "Harsha" in blocks[1]["text"]
+    # CHO-274: rare use — not "address them by first name when it reads naturally".
+    assert "at most once" in blocks[1]["text"]
+    assert "Do NOT start routine replies with their name" in blocks[1]["text"]
     # No name → the tail is just the status line (no dangling name text).
     plain = primed_messages(at(2026, 7, 20, 14, 47))[0]["content"][1]["text"]
     assert "speaking with" not in plain
+
+
+def test_contract_notes_missing_dates_use_form_not_freetext():
+    """CHO-274: contract-note dates never asked in prose — open_report_form."""
+    assert "Contract-note date range is NEVER" in PRIMED_INSTRUCTIONS
+    assert "get my contract notes" in PRIMED_INSTRUCTIONS
+    assert "flow=contract-notes" in PRIMED_INSTRUCTIONS
+    from app.agent import tools as agent_tools
+
+    list_tool = next(t for t in agent_tools.tool_schemas() if t["name"] == "list_contract_notes")
+    desc = list_tool["description"]
+    assert "open_report_form" in desc
+    assert "ALWAYS call this first" not in desc
 
 
 def test_first_name_never_enters_the_prompt_snapshot():
