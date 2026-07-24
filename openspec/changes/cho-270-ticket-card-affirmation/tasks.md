@@ -17,4 +17,5 @@
 ## 4. Verify & ship
 
 - [x] 4.1 `cd backend && uv run pytest tests/test_agent_tickets.py -q`
-- [ ] 4.2 Push branch + draft PR (`Fixes CHO-270`)
+- [x] 4.2 Push branch + draft PR (`Fixes CHO-270`) — https://github.com/AtharvaMaskar2608/customer-support-chatbot-phase1-live-v2/pull/68
+- [ ] 4.3 Linear summary when MCP/API available (blocked in this cloud run)
