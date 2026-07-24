@@ -1,9 +1,11 @@
 """Prompt-engineering playground (CHO-272).
 
 Isolated from production `/api/chat`: gated by ``PLAYGROUND_TOKEN`` (404 when
-unset), sessions namespaced under ``pg:``, and prompt overrides accepted only
-on these endpoints. Production prompt constants remain the source of truth for
-the live agent.
+unset), conversation threads namespaced under ``pg:`` via
+``thread_session_id``, and prompt overrides accepted only on these endpoints.
+``ToolCtx.session_id`` stays the live FinX SessionId so tool/upstream auth
+works. Production prompt constants remain the source of truth for the live
+agent.
 """
 
 from __future__ import annotations
@@ -93,8 +95,11 @@ async def playground_chat(
     if not authorization or not x_session_id or not x_user_id:
         return _missing_credentials()
 
+    # ToolCtx.session_id must stay the live FinX SessionId — tools, greeting,
+    # and contract-note auth all reuse it. Thread isolation uses a separate
+    # namespaced store key so playground chats never collide with production.
     ctx = ToolCtx(
-        session_id=_pg_session(x_session_id),
+        session_id=x_session_id,
         sso_jwt=authorization,
         client_code=x_user_id,
         http_client=request.app.state.http_client,
@@ -113,6 +118,7 @@ async def playground_chat(
             client=_anthropic_client(request),
             system_override=system_override,
             primed_override=primed_override,
+            thread_session_id=_pg_session(x_session_id),
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},

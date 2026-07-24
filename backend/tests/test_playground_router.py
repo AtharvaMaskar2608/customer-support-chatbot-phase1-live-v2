@@ -93,3 +93,62 @@ def test_prompt_override_helpers_drop_cache_control():
     draft = agent_prompt.primed_messages(instructions_override="draft primed")
     assert draft[0]["content"][0]["text"] == "draft primed"
     assert "cache_control" not in draft[0]["content"][0]
+
+
+def test_playground_chat_keeps_finx_session_id_on_tool_ctx(app_no_db, monkeypatch):
+    """Thread isolation uses pg:…; ToolCtx.session_id must stay the live FinX id."""
+    captured: dict = {}
+
+    async def fake_stream(**kwargs):
+        captured["ctx"] = kwargs["ctx"]
+        captured["thread_session_id"] = kwargs.get("thread_session_id")
+        if False:  # pragma: no cover — make this an async generator
+            yield ""
+
+    monkeypatch.setattr(
+        "app.playground.router.run_chat_stream", fake_stream
+    )
+
+    with _client(app_no_db, monkeypatch, token=TOKEN) as client:
+        res = client.post(
+            "/api/playground/chat",
+            json={"message": "show holdings"},
+            headers={
+                "Authorization": "jwt-token",
+                "X-Session-Id": "finx-live-session",
+                "X-User-Id": "X008593",
+                "X-Playground-Token": TOKEN,
+            },
+        )
+        # StreamingResponse consumes the generator; status is still 200.
+        assert res.status_code == 200
+
+    assert captured["ctx"].session_id == "finx-live-session"
+    assert captured["thread_session_id"] == "pg:finx-live-session"
+
+
+def test_playground_reset_uses_namespaced_store_key(app_no_db, monkeypatch):
+    reset_keys: list[str] = []
+
+    async def fake_reset(session_id, *, client_code=None):
+        reset_keys.append(session_id)
+
+    with _client(app_no_db, monkeypatch, token=TOKEN) as client:
+        monkeypatch.setattr(
+            client.app.state.conversation_store,
+            "reset_thread",
+            fake_reset,
+        )
+        res = client.post(
+            "/api/playground/chat/reset",
+            headers={
+                "Authorization": "jwt-token",
+                "X-Session-Id": "finx-live-session",
+                "X-User-Id": "X008593",
+                "X-Playground-Token": TOKEN,
+            },
+        )
+        assert res.status_code == 200
+        assert res.json() == {"ok": True}
+
+    assert reset_keys == ["pg:finx-live-session"]
