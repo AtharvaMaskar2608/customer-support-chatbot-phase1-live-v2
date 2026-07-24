@@ -179,10 +179,21 @@ def _artifact_payload(
 
 
 async def run_chat_stream(
-    *, message: str, ctx: ToolCtx, store: ThreadStore, client: Any
+    *,
+    message: str,
+    ctx: ToolCtx,
+    store: ThreadStore,
+    client: Any,
+    system_override: str | None = None,
+    primed_override: str | None = None,
 ) -> AsyncIterator[str]:
     """The SSE generator for one /api/chat request. Never raises into the
-    transport: any unexpected failure becomes a terminal error event."""
+    transport: any unexpected failure becomes a terminal error event.
+
+    Optional `system_override` / `primed_override` (CHO-272 playground) swap
+    the production prompt constants for this stream only. Production callers
+    pass neither — behavior is unchanged.
+    """
     terminal_emitted = False
     try:
         # CHO-261: the whole turn is one `agent` trace persisted to Postgres,
@@ -194,7 +205,12 @@ async def run_chat_stream(
             client_code=ctx.client_code,
             pool=ctx.pg_pool,
             run=lambda: _chat_events(
-                message=message, ctx=ctx, store=store, client=client
+                message=message,
+                ctx=ctx,
+                store=store,
+                client=client,
+                system_override=system_override,
+                primed_override=primed_override,
             ),
         ):
             if chunk.startswith("event: done") or chunk.startswith(
@@ -209,9 +225,20 @@ async def run_chat_stream(
 
 
 async def _chat_events(
-    *, message: str, ctx: ToolCtx, store: ThreadStore, client: Any
+    *,
+    message: str,
+    ctx: ToolCtx,
+    store: ThreadStore,
+    client: Any,
+    system_override: str | None = None,
+    primed_override: str | None = None,
 ) -> AsyncIterator[str]:
-    store.register_prompt(agent_prompt.snapshot_text(), agent_tools.tool_schemas())
+    # Production only: record the frozen prompt snapshot. Experimental
+    # playground drafts must not churn prompt_snapshots.
+    if system_override is None and primed_override is None:
+        store.register_prompt(
+            agent_prompt.snapshot_text(), agent_tools.tool_schemas()
+        )
     thread = await store.get_thread(ctx.session_id, client_code=ctx.client_code)
     # Conversation context for tools that need it (CHO-218): the ticket core
     # renders its transcript from ctx.thread — same live object, so turns
@@ -251,7 +278,13 @@ async def _chat_events(
 
     while True:
         force_wrapup = rounds >= config.agent_max_tool_rounds()
-        messages = agent_prompt.primed_messages(first_name=thread.first_name) + thread.messages()
+        messages = (
+            agent_prompt.primed_messages(
+                first_name=thread.first_name,
+                instructions_override=primed_override,
+            )
+            + thread.messages()
+        )
         if escalation_reminder is not None:
             messages.append(_reminder_message(escalation_reminder))
         if force_wrapup:
@@ -261,7 +294,7 @@ async def _chat_events(
         kwargs: dict = {
             "model": model,
             "max_tokens": config.agent_max_tokens(),
-            "system": agent_prompt.system_blocks(),
+            "system": agent_prompt.system_blocks(override=system_override),
             "tools": agent_tools.tool_schemas(),
             "messages": messages,
             **config.agent_thinking_params(model, config.agent_thinking()),
