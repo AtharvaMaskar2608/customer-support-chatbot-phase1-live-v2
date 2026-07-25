@@ -314,6 +314,22 @@ def agent_max_tool_rounds() -> int:
     return int(os.environ.get("AGENT_MAX_TOOL_ROUNDS", "5"))
 
 
+def agent_history_cache() -> bool:
+    """Rolling prompt-cache breakpoint on the conversation history
+    (AGENT_HISTORY_CACHE env, default ON — CHO-264).
+
+    Gates ONLY the `cache_control` marker, never the message layout: the live
+    status line rides the trailing message unconditionally, so turning this off
+    restores the previous two-breakpoint request without touching assembly.
+    Default-on because the failure mode is a bounded input-cost regression, not
+    a correctness / latency / SSE change; the flag exists so a rollback is an
+    env flip and a container recreate rather than a rebuild.
+    """
+    return os.environ.get("AGENT_HISTORY_CACHE", "1").strip().lower() not in {
+        "0", "false", "no", "off",
+    }
+
+
 def anthropic_api_key() -> str | None:
     """Anthropic key for the agent loop (env, or repo-root .env in dev)."""
     return _secret("ANTHROPIC_API_KEY")

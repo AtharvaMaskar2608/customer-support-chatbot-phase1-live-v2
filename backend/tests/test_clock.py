@@ -22,7 +22,11 @@ import pytest
 
 from app import clock
 from app.agent.forms import OpenReportFormParams, run_open_report_form, validate_seed
-from app.agent.prompt import PRIMED_INSTRUCTIONS, primed_messages, snapshot_text
+from app.agent.prompt import (
+    PRIMED_INSTRUCTIONS,
+    snapshot_text,
+    trailing_context_message,
+)
 
 UTC = datetime.timezone.utc
 
@@ -138,24 +142,24 @@ def test_boundary_0531_ist_agrees(at_utc):
 
 
 def test_prompt_status_line_uses_ist(at_utc, process_tz):
-    """01:00 IST on the 21st, under a UTC host that still says the 20th."""
+    """01:00 IST on the 21st, under a UTC host that still says the 20th.
+
+    CHO-264: the status line now rides the trailing live-context message, not
+    the primed turn — the IST correctness contract is unchanged.
+    """
     at_utc(ONE_AM_IST)
     process_tz("UTC")
-    blocks = primed_messages()[0]["content"]
-    assert blocks[1]["text"].startswith(
-        "Right now it is 1:00 am IST on Tuesday, 21 July 2026."
-    )
-    assert "20 July" not in blocks[1]["text"]
+    text = trailing_context_message()["content"][0]["text"]
+    assert "Right now it is 1:00 am IST on Tuesday, 21 July 2026." in text
+    assert "20 July" not in text
 
 
 def test_prompt_injected_now_still_wins(at_utc):
     """The injectable parameter is untouched — tests keep pinning the clock."""
     at_utc(ONE_AM_IST)
     pinned = datetime.datetime(2026, 1, 2, 11, 0, tzinfo=clock.IST)
-    blocks = primed_messages(now=pinned)[0]["content"]
-    assert blocks[1]["text"].startswith(
-        "Right now it is 11:00 am IST on Friday, 2 January 2026."
-    )
+    text = trailing_context_message(now=pinned)["content"][0]["text"]
+    assert "Right now it is 11:00 am IST on Friday, 2 January 2026." in text
 
 
 # --- call site: the form validator ------------------------------------------
