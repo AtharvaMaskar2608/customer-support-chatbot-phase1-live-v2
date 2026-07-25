@@ -1529,7 +1529,9 @@ def test_unaffirmed_model_ticket_is_rejected_with_zero_freshdesk_requests(
         assert finished == [{
             "name": "raise_support_ticket", "status": "finished", "is_error": True,
         }]
-        bounce = fake.calls[1]["messages"][-1]["content"][0]
+        # [-1] is CHO-264's trailing volatile message (live context + reminders);
+        # the bounced tool_result rides the last STORED message before it.
+        bounce = fake.calls[1]["messages"][-2]["content"][0]
         assert bounce["type"] == "tool_result"
         assert bounce["is_error"] is True
         assert "Do NOT raise a ticket" in bounce["content"]
