@@ -7,7 +7,9 @@ auth expiry) or through a monkeypatched dispatch_outcome (loop mechanics).
 """
 
 import asyncio
+import datetime
 import json
+import os
 
 import httpx
 import pytest
@@ -162,6 +164,73 @@ def _ok_outcome(envelope):
     return fake
 
 
+# --- prompt-cache breakpoint helpers (CHO-264) --------------------------------
+
+
+def _history(call_kwargs):
+    """The replayed-history slice of one request: the frozen primed exchange
+    dropped from the front, the single trailing volatile message from the back."""
+    return call_kwargs["messages"][2:-1]
+
+
+def _marked_indices(call_kwargs):
+    """Indices (into `_history`) whose last content block carries a breakpoint."""
+    return [
+        index
+        for index, message in enumerate(_history(call_kwargs))
+        if "cache_control" in message["content"][-1]
+    ]
+
+
+def _breakpoint_count(call_kwargs):
+    """Total cache_control markers in one request, across every param."""
+    return sum(
+        json.dumps(call_kwargs[key]).count('"cache_control"')
+        for key in ("system", "tools", "messages")
+    )
+
+
+def _strip_breakpoints(messages):
+    return [
+        {
+            **message,
+            "content": [
+                {k: v for k, v in block.items() if k != "cache_control"}
+                for block in message["content"]
+            ],
+        }
+        for message in messages
+    ]
+
+
+def _seed_multiround_turn(app, thread, *, rounds, parallel, text="dig deep"):
+    """Store one COMPLETED multi-round turn exactly as the loop would have: the
+    user message, `rounds` rounds of `parallel` tool calls (each round's results
+    merging into one user message), then the final assistant text."""
+    _append(app, thread, role="user", kind="user_text", text=text)
+    for round_index in range(rounds):
+        ids = [f"tu_{round_index}_{n}" for n in range(parallel)]
+        _append(
+            app, thread, role="assistant", kind="assistant_tool_use",
+            content=[
+                _tool_use("search_knowledge_base", block_id=block_id)
+                for block_id in ids
+            ],
+        )
+        for block_id in ids:
+            _append(
+                app, thread, role="user", kind="tool_result",
+                content=[{
+                    "type": "tool_result", "tool_use_id": block_id,
+                    "content": "{}", "is_error": False,
+                }],
+                meta={"tool_name": "search_knowledge_base", "is_error": False,
+                      "duration_ms": 1},
+            )
+    _append(app, thread, role="assistant", kind="assistant_text",
+            text="here is what I found")
+
+
 # --- loop termination + request assembly -------------------------------------
 
 
@@ -186,25 +255,37 @@ def test_end_turn_streams_text_and_terminates(app):
         assert kwargs["system"][0]["cache_control"] == {"type": "ephemeral"}
         assert len(kwargs["tools"]) == 12  # 9 capability tools + form + ticket + get_report_columns (CHO-228)
 
-        # primed first turn: two blocks — frozen instructions carrying the
-        # cache breakpoint, then the live IST status line LAST (CHO-226 D8).
+        # primed first turn: ONE frozen block carrying the cache breakpoint
+        # (CHO-264 D1 — the live status line moved to the trailing message).
         messages = kwargs["messages"]
         primed = messages[0]["content"]
         assert messages[0]["role"] == "user"
-        assert len(primed) == 2
+        assert len(primed) == 1
         assert primed[0]["cache_control"] == {"type": "ephemeral"}
         assert "Right now it is" not in primed[0]["text"]
-        assert "cache_control" not in primed[1]
-        assert primed[1]["text"].startswith("Right now it is ")
-        assert " IST on " in primed[1]["text"]
         assert messages[1] == {
             "role": "assistant",
             "content": [{"type": "text", "text": "Understood."}],
         }
+        # the stored user turn, carrying the rolling history breakpoint
         assert messages[2] == {
             "role": "user",
-            "content": [{"type": "text", "text": "hi"}],
+            "content": [
+                {
+                    "type": "text",
+                    "text": "hi",
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
         }
+        # the ONE trailing volatile message: live context, no breakpoint
+        assert messages[-1]["role"] == "user"
+        live = messages[-1]["content"][0]
+        assert len(messages[-1]["content"]) == 1
+        assert "cache_control" not in live
+        assert live["text"].startswith("<system-reminder>Live context")
+        assert " IST on " in live["text"]
+        assert "Right now it is " in live["text"]
 
         # store: wire-faithful turns with assistant meta
         thread = _get_thread(app)
@@ -301,7 +382,8 @@ def test_parallel_tool_use_answered_in_one_user_message(app, monkeypatch):
         assert all(d["is_error"] is False for d in started + finished)
 
         # both tool_results ride in ONE user message on the wire
-        followup = fake.calls[1]["messages"][-1]
+        # ([-1] is now the trailing volatile message — CHO-264)
+        followup = fake.calls[1]["messages"][-2]
         assert followup["role"] == "user"
         assert [b["type"] for b in followup["content"]] == ["tool_result"] * 2
         assert [b["tool_use_id"] for b in followup["content"]] == ["tu_1", "tu_2"]
@@ -338,7 +420,7 @@ def test_is_error_bounce_feeds_validation_back_to_model(app):
         assert events[-1][0] == "done"
 
         # the bounced tool_result reached the second model call
-        bounce = fake.calls[1]["messages"][-1]["content"][0]
+        bounce = fake.calls[1]["messages"][-2]["content"][0]
         assert bounce["type"] == "tool_result"
         assert bounce["is_error"] is True
         assert "fromDate" in bounce["content"] and "ask the user" in bounce["content"]
@@ -352,11 +434,17 @@ def test_is_error_bounce_feeds_validation_back_to_model(app):
 
 
 def _reminder_texts(call_kwargs):
+    """Injected reminder blocks only. The trailing live-context block shares the
+    <system-reminder> frame (CHO-264 D2), so it is excluded by its header."""
+    from app.agent.prompt import LIVE_CONTEXT_HEADER
+
     return [
         block["text"]
         for message in call_kwargs["messages"]
         for block in message["content"]
-        if isinstance(block, dict) and "<system-reminder>" in block.get("text", "")
+        if isinstance(block, dict)
+        and "<system-reminder>" in block.get("text", "")
+        and LIVE_CONTEXT_HEADER not in block["text"]
     ]
 
 
@@ -403,8 +491,11 @@ def test_clarify_cap_trips_and_injects_escalation(app):
         assert len(reminders) == 1
         assert "raise_support_ticket" in reminders[0]  # CHO-218 wording
         assert "clarifying question" in reminders[0]
-        # reminder is appended at the END of messages, never stored
-        assert fake.calls[0]["messages"][-1]["content"][0]["text"] == reminders[0]
+        # the reminder rides the ONE trailing message, after the live context
+        # (CHO-264), and is never stored
+        trailing = fake.calls[0]["messages"][-1]["content"]
+        assert len(trailing) == 2
+        assert trailing[1]["text"] == reminders[0]
         assert "<system-reminder>" not in json.dumps(thread.messages())
         assert events[-1] == (
             "done", {"thread": {"taskTurns": 3, "sessionTurns": 3, "lastSeq": 6}},
@@ -496,6 +587,269 @@ def test_tool_round_guard_forces_wrapup_call(app, monkeypatch):
     started = [d for e, d in events if e == "tool" and d["status"] == "started"]
     assert len(started) == 5
     assert events[-1][0] == "done"  # guard exhaustion still ends cleanly
+
+    # CHO-264 (test_wrapup_round_drops_history_breakpoint): the wrap-up round
+    # places NO history breakpoint — tool_choice:none changes the messages-tier
+    # cache key, so that write could never be read back. The round before it
+    # carries one.
+    assert _marked_indices(fake.calls[4]) == [len(_history(fake.calls[4])) - 1]
+    assert _marked_indices(fake.calls[5]) == []
+    assert "cache_control" not in json.dumps(_history(fake.calls[5]))
+
+
+# --- prompt-cache breakpoints + the trailing volatile message (CHO-264) -------
+
+
+def test_history_breakpoint_marks_last_stored_block(app):
+    """The rolling breakpoint lands on the last content block of the last
+    STORED message — messages[-1] is the trailing volatile message."""
+    fake = FakeAnthropic([_text_msg("hello back")])
+    with TestClient(app) as client:
+        app.state.anthropic_client = fake
+        _post_chat(client, "hello")
+
+    messages = fake.calls[0]["messages"]
+    assert messages[-2]["content"][-1]["cache_control"] == {"type": "ephemeral"}
+    assert messages[-2]["content"][-1]["text"] == "hello"
+    # never on the primed prefix's live position and never a "ttl" (CHO-278)
+    assert '"ttl"' not in json.dumps(messages)
+
+
+def test_history_breakpoint_does_not_mutate_stored_turns(app):
+    """Copy-on-mark: `Thread.messages()` shares its block dicts with
+    `thread.turns`, so an in-place mark would leak into the store, the ticket
+    transcript, and the persisted rows."""
+    fake = FakeAnthropic([_text_msg("sure")])
+    with TestClient(app) as client:
+        app.state.anthropic_client = fake
+        thread = _get_thread(app)
+        _append(app, thread, role="user", kind="user_text", text="earlier ask")
+        _append(app, thread, role="assistant", kind="assistant_text",
+                text="earlier answer")
+        before = json.dumps(thread.messages())
+        _post_chat(client, "follow-up")
+        after = json.dumps(thread.messages()[:2])
+
+    # the marker really was placed (this test is not vacuous) ...
+    assert _marked_indices(fake.calls[0])
+    # ... yet nothing of it reached the store
+    assert "cache_control" not in json.dumps([t.content for t in thread.turns])
+    assert "cache_control" not in json.dumps(thread.messages())
+    assert after == before
+
+
+def test_trailing_message_carries_no_breakpoint(app):
+    fake = FakeAnthropic([_text_msg("ok")])
+    with TestClient(app) as client:
+        app.state.anthropic_client = fake
+        _post_chat(client, "hello")
+
+    trailing = fake.calls[0]["messages"][-1]
+    assert trailing["role"] == "user"
+    assert "cache_control" not in json.dumps(trailing)
+
+
+def test_only_the_trailing_message_is_volatile(app, monkeypatch):
+    """The cache-stability invariant as a unit test: with identical stored
+    turns, two requests five minutes apart are byte-identical up to the last
+    message. Anything volatile before a breakpoint would invalidate the history
+    entry on the very next turn."""
+    pinned = {"now": datetime.datetime(2026, 7, 20, 9, 17, tzinfo=datetime.timezone.utc)}
+    monkeypatch.setattr("app.clock._utc_now", lambda: pinned["now"])
+    fake = FakeAnthropic([_text_msg("first"), _text_msg("second")])
+    with TestClient(app) as client:
+        app.state.anthropic_client = fake
+        _post_chat(client, "same question")
+        # a fresh thread gives the second request byte-identical stored turns
+        assert client.post("/api/chat/reset", headers=HEADERS).status_code == 200
+        pinned["now"] += datetime.timedelta(minutes=5)
+        _post_chat(client, "same question")
+
+    first = fake.calls[0]["messages"]
+    second = fake.calls[1]["messages"]
+    assert json.dumps(first[:-1]) == json.dumps(second[:-1])
+    assert first[-1] != second[-1]
+    assert "2:47 pm" in first[-1]["content"][0]["text"]
+    assert "2:52 pm" in second[-1]["content"][0]["text"]
+
+
+def test_at_most_four_cache_breakpoints(app):
+    """system + primed instructions + rolling tip (+ the conditional insurance
+    marker on a deep-gap round) — never more, and `tools` carry none."""
+    fake = FakeAnthropic([_text_msg("short"), _text_msg("deep")])
+    with TestClient(app) as client:
+        app.state.anthropic_client = fake
+        _post_chat(client, "hello")
+        thread = _get_thread(app)
+        _seed_multiround_turn(app, thread, rounds=5, parallel=3)
+        _post_chat(client, "and now this")
+
+    normal, deep = fake.calls[0], fake.calls[1]
+    assert _breakpoint_count(normal) == 3
+    assert _breakpoint_count(deep) == 4
+    for call in (normal, deep):
+        assert "cache_control" not in json.dumps(call["tools"])
+        assert json.dumps(call["system"]).count('"cache_control"') == 1
+
+
+def test_marker_rolls_once_per_round(app, monkeypatch):
+    monkeypatch.setattr(
+        "app.agent.tools.dispatch_outcome", _ok_outcome({"kind": "ok"})
+    )
+    fake = FakeAnthropic(
+        [_tool_msg(_tool_use("search_knowledge_base", block_id=f"tu_{i}"))
+         for i in range(3)]
+        + [_text_msg("here it is")]
+    )
+    with TestClient(app) as client:
+        app.state.anthropic_client = fake
+        _post_chat(client, "dig")
+
+    assert len(fake.calls) == 4
+    for call in fake.calls:
+        assert _marked_indices(call) == [len(_history(call)) - 1]
+
+
+def test_insurance_marker_bridges_a_deep_gap(app):
+    """After a max-round turn with parallel tools the new tip is far past the
+    last valid entry, so a second breakpoint is placed on the deepest message
+    still within the lookback window OF THAT ENTRY — not of the tip."""
+    fake = FakeAnthropic([_text_msg("deep"), _text_msg("shallow")])
+    with TestClient(app) as client:
+        app.state.anthropic_client = fake
+        thread = _get_thread(app)
+        _seed_multiround_turn(app, thread, rounds=5, parallel=3)
+        _post_chat(client, "next question")
+
+        assert client.post("/api/chat/reset", headers=HEADERS).status_code == 200
+        thread = _get_thread(app)
+        _seed_multiround_turn(app, thread, rounds=1, parallel=1)
+        _post_chat(client, "next question")
+
+    history = _history(fake.calls[0])
+    marked = _marked_indices(fake.calls[0])
+    assert len(marked) == 2
+    assert marked[1] == len(history) - 1  # the rolling tip
+    anchor = marked[0]
+    # entry index 0 = the previous turn's user message (its round-1 tip)
+    reach = sum(len(m["content"]) for m in history[1:anchor + 1])
+    assert reach <= 19  # readable from that entry
+    # and it is the DEEPEST such message: one more would overshoot
+    assert reach + len(history[anchor + 1]["content"]) > 19
+    # a short single-round turn needs no insurance marker
+    assert len(_marked_indices(fake.calls[1])) == 1
+
+
+def test_history_cache_flag_off_matches_legacy_layout(app, monkeypatch):
+    """AGENT_HISTORY_CACHE=0 is a no-rebuild rollback: only the system and
+    primed breakpoints remain, and nothing else about the array changes."""
+    pinned = datetime.datetime(2026, 7, 20, 9, 17, tzinfo=datetime.timezone.utc)
+    monkeypatch.setattr("app.clock._utc_now", lambda: pinned)
+    fake = FakeAnthropic([_text_msg("on"), _text_msg("off")])
+    with TestClient(app) as client:
+        app.state.anthropic_client = fake
+        _post_chat(client, "same question")
+        assert client.post("/api/chat/reset", headers=HEADERS).status_code == 200
+        monkeypatch.setenv("AGENT_HISTORY_CACHE", "0")
+        _post_chat(client, "same question")
+
+    on, off = fake.calls[0], fake.calls[1]
+    assert _breakpoint_count(on) == 3
+    assert _breakpoint_count(off) == 2
+    assert _marked_indices(off) == []
+    assert _strip_breakpoints(on["messages"]) == _strip_breakpoints(off["messages"])
+
+
+def test_trailing_context_is_framed_as_app_generated(app):
+    """The trailing message sits right after the user's own question, so the
+    live context is wrapped in the app-generated reminder frame — and that frame
+    is never persisted."""
+    fake = FakeAnthropic([_text_msg("ok")])
+    with TestClient(app) as client:
+        app.state.anthropic_client = fake
+        _post_chat(client, "hello")
+        thread = _get_thread(app)
+
+    live = fake.calls[0]["messages"][-1]["content"][0]["text"]
+    assert live.startswith("<system-reminder>")
+    assert live.endswith("</system-reminder>")
+    assert "not typed by the user" in live
+    assert "Right now it is " in live
+    assert "<system-reminder>" not in json.dumps(thread.messages())
+
+
+def test_model_and_thinking_resolved_once_per_turn(app, monkeypatch):
+    """An env flip between rounds must not split one turn across two models:
+    caches are model-scoped, so every tier would drop, and turns.meta.model
+    would record the wrong model."""
+    monkeypatch.setenv("AGENT_MODEL", "claude-sonnet-4-6")
+    monkeypatch.setenv("AGENT_THINKING", "off")
+
+    async def flip_env_then_succeed(name, tool_input, ctx):
+        os.environ["AGENT_MODEL"] = "claude-haiku-4-5"
+        os.environ["AGENT_THINKING"] = "minimal"
+        return DispatchOutcome(
+            content='{"kind":"ok"}', is_error=False, duration_ms=1,
+            envelope={"kind": "ok"},
+        )
+
+    monkeypatch.setattr(
+        "app.agent.tools.dispatch_outcome", flip_env_then_succeed
+    )
+    fake = FakeAnthropic([
+        _tool_msg(_tool_use("search_knowledge_base")),
+        _text_msg("here it is"),
+    ])
+    with TestClient(app) as client:
+        app.state.anthropic_client = fake
+        _post_chat(client, "dig")
+        thread = _get_thread(app)
+
+    assert len(fake.calls) == 2
+    assert [call["model"] for call in fake.calls] == ["claude-sonnet-4-6"] * 2
+    assert all("thinking" not in call for call in fake.calls)
+    assert config.agent_model() == "claude-haiku-4-5"  # the flip did land
+    assert thread.turns[-1].meta["model"] == "claude-sonnet-4-6"
+
+
+def test_flow_event_memo_between_tool_results_keeps_results_first(app):
+    """The marker rule depends on the store's results-first partition: a
+    flow_event landing between two tool_results of one round must not push a
+    tool_result behind it, and marking the tip must leave every earlier block
+    byte-identical."""
+    from app.agent import store as agent_store
+
+    with TestClient(app):
+        thread = _get_thread(app)
+        _append(app, thread, role="user", kind="user_text", text="two things")
+        _append(
+            app, thread, role="assistant", kind="assistant_tool_use",
+            content=[
+                _tool_use("raise_support_ticket", block_id="tu_1"),
+                _tool_use("search_knowledge_base", block_id="tu_2"),
+            ],
+        )
+        _append(app, thread, role="user", kind="tool_result",
+                content=[{"type": "tool_result", "tool_use_id": "tu_1",
+                          "content": "{}", "is_error": False}])
+        _append(app, thread, role="user", kind="flow_event",
+                content=[{"type": "text",
+                          "text": "[App event] Support ticket #1 raised."}])
+        _append(app, thread, role="user", kind="tool_result",
+                content=[{"type": "tool_result", "tool_use_id": "tu_2",
+                          "content": "{}", "is_error": False}])
+
+        plain = thread.messages()
+        marked = agent_store.with_history_breakpoint(plain)
+
+    types = ["tool_result", "tool_result", "text"]
+    assert [b["type"] for b in plain[-1]["content"]] == types
+    assert [b["type"] for b in marked[-1]["content"]] == types
+    assert marked[-1]["content"][-1]["cache_control"] == {"type": "ephemeral"}
+    # everything before the marked block is untouched, byte for byte
+    assert json.dumps(marked[:-1]) == json.dumps(plain[:-1])
+    assert marked[-1]["content"][:-1] == plain[-1]["content"][:-1]
+    assert "cache_control" not in json.dumps([t.content for t in thread.turns])
 
 
 # --- SSE sequence + artifacts -------------------------------------------------
@@ -874,8 +1228,9 @@ def test_short_circuited_turn_continues_cleanly(app):
         events = _parse_events(_post_chat(client, "thanks, what are DP charges?"))
 
     assert events[-1][0] == "done"
-    # The second call's last user message: tool_result first, then the text.
-    last_user = fake.calls[1]["messages"][-1]
+    # The second call's last STORED user message ([-1] is the trailing volatile
+    # message): tool_result first, then the text.
+    last_user = fake.calls[1]["messages"][-2]
     assert last_user["role"] == "user"
     types = [block["type"] for block in last_user["content"]]
     assert types == ["tool_result", "text"]
@@ -962,7 +1317,7 @@ def test_raise_ticket_failure_bounces_and_model_narrates(app, monkeypatch):
         assert events[-1][0] == "done"
 
         # the bounced tool_result is actionable; no flow_event memo appended
-        bounce = fake.calls[1]["messages"][-1]["content"][0]
+        bounce = fake.calls[1]["messages"][-2]["content"][0]
         assert bounce["is_error"] is True
         assert "support system" in bounce["content"]
         thread = _get_thread(app)
@@ -996,11 +1351,19 @@ def test_chat_reset_gives_blank_slate(app):
 
         events = _parse_events(_post_chat(client, "hello"))
 
-    # Second model call sees ONLY the primed exchange + the new message.
+    # Second model call sees ONLY the primed exchange + the new message + the
+    # trailing live-context message (CHO-264).
     messages = fake.calls[1]["messages"]
-    assert len(messages) == 3
+    assert len(messages) == 4
     assert messages[2] == {
-        "role": "user", "content": [{"type": "text", "text": "hello"}],
+        "role": "user",
+        "content": [
+            {
+                "type": "text",
+                "text": "hello",
+                "cache_control": {"type": "ephemeral"},
+            }
+        ],
     }
     assert "only care about" not in json.dumps(messages)  # old turn is gone
     # Counters (and the feedback anchor) restarted with the fresh thread.
@@ -1101,3 +1464,81 @@ def test_feedback_on_empty_thread_is_ok_and_stores_nothing(app):
         assert resp.status_code == 200
         assert resp.json() == {"ok": True}
         assert _feedback_jobs(app) == []
+
+
+# --- E5 · the ticket-affirmation guard (CHO-276) -------------------------------
+#
+# This is eval case E5, and it lives HERE rather than in backend/evals/ on
+# purpose: `raise_support_ticket` has no dry-run mode (config exposes only
+# FRESHDESK_API_ROOT / FRESHDESK_API_KEY), and the case's whole point is the
+# branch where the guard must REJECT. A live eval that regressed would file real
+# Freshdesk tickets — the eval would cause the incident it exists to catch.
+# respx makes "zero POSTs to /tickets" a first-class assertion, which is the
+# stronger statement anyway.
+#
+# Parametrized over both context-curation flag states. AGENT_CONTEXT_CURATION is
+# introduced by CHO-271; until then setting it is inert and the two runs are
+# identical — which is exactly the "behaviour is identical in each" claim, and it
+# starts biting the moment the flag means something.
+
+
+@pytest.mark.parametrize("curation", ["0", "1"])
+def test_unaffirmed_model_ticket_is_rejected_with_zero_freshdesk_requests(
+    app, monkeypatch, curation
+):
+    """The model decides to escalate on its own: the user's latest message
+    neither asks for a human nor accepts an offer (there was no offer). The
+    dispatcher must bounce the call as an is_error result carrying the
+    offer-instead instruction, the ticket artifact must never be emitted, and
+    Freshdesk must see NOTHING."""
+    monkeypatch.setenv("AGENT_CONTEXT_CURATION", curation)
+    _fd_env(monkeypatch)
+    fake = FakeAnthropic([
+        _tool_msg(_tool_use("raise_support_ticket", {"reason": "funds not visible"})),
+        _text_msg("Want me to raise a ticket so the team can take this up?"),
+    ])
+    # assert_all_called=False: the whole point is that this route is never hit.
+    with respx.mock(assert_all_called=False) as router:
+        tickets = router.post(f"{FD_ROOT}/tickets").mock(
+            return_value=httpx.Response(201, json={"id": 7559999})
+        )
+        with TestClient(app) as client:
+            app.state.anthropic_client = fake
+            thread = _get_thread(app)
+            # Skip the best-effort Profile name lookup so the ONLY outbound
+            # request this turn could make is the ticket POST under assertion.
+            thread.name_fetched = True
+            # A plain factual exchange: no escalation ask, no ticket offer to
+            # affirm, so a model-emitted raise is the model deciding.
+            _append(app, thread, role="user", kind="user_text",
+                    text="my ledger balance looks lower than I expected")
+            _append(app, thread, role="assistant", kind="assistant_text",
+                    text="Debits and credits both show in the ledger report — "
+                         "the balance column is the running total after each entry.")
+            events = _parse_events(
+                _post_chat(client, "my funds from yesterday still are not showing")
+            )
+
+        # zero Freshdesk traffic, whatever else happened
+        assert tickets.call_count == 0
+        assert [c for c in router.calls if "/tickets" in str(c.request.url)] == []
+        assert len(router.calls) == 0  # in fact no outbound request at all
+
+        # the guard bounced it as an actionable is_error result
+        finished = [d for e, d in events if e == "tool" and d["status"] == "finished"]
+        assert finished == [{
+            "name": "raise_support_ticket", "status": "finished", "is_error": True,
+        }]
+        # [-1] is CHO-264's trailing volatile message (live context + reminders);
+        # the bounced tool_result rides the last STORED message before it.
+        bounce = fake.calls[1]["messages"][-2]["content"][0]
+        assert bounce["type"] == "tool_result"
+        assert bounce["is_error"] is True
+        assert "Do NOT raise a ticket" in bounce["content"]
+        assert "Want me to raise a ticket" in bounce["content"]
+
+        # no ticket card, no ticket memo, and the turn still ends cleanly
+        assert not [e for e, _ in events if e == "artifact"]
+        assert events[-1][0] == "done"
+        thread = _get_thread(app)
+        assert "flow_event" not in [t.kind for t in thread.turns]

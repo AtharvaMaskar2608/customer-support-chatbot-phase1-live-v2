@@ -30,3 +30,10 @@ jini-embed-demo.html
 
 # deploy image tarballs (docker save output — build artifacts, never commit)
 jini-*.tar.gz
+
+# Agent worktrees (transient, created by Claude Code isolation)
+.claude/worktrees/
+
+# routing-eval sweep reports (CHO-276) — per-run artifacts, attached to Linear
+# rather than committed
+backend/evals/reports/

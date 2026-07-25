@@ -337,10 +337,18 @@ async def observe_turn(
 
 
 async def observe_model_round(
-    *, user_input: str, open_stream: Callable[[], Any], holder: dict,
+    *,
+    user_input: str,
+    open_stream: Callable[[], Any],
+    holder: dict,
+    extra: dict | None = None,
 ) -> AsyncIterator[str]:
     """llm span for one streamed model round; yields text deltas and stashes the
-    final message in ``holder['final']`` for the loop to continue."""
+    final message in ``holder['final']`` for the loop to continue.
+
+    `extra` (CHO-271) is merged into the span metadata — COUNTS ONLY (curated
+    turns, estimated history tokens). Never message text, tool inputs or
+    envelopes: the span already records only redact(user_input) + usage."""
     trace = _current_trace.get()
     if trace is None:
         async with open_stream() as stream:
@@ -372,8 +380,21 @@ async def observe_model_round(
         "cache_creation_input_tokens": _usage_get(
             usage, "cache_creation_input_tokens"
         ),
+        # CHO-278: cache writes bill per TTL (5m = 1.25x base input, 1h = 2x),
+        # and the aggregate above carries no TTL. Record the split so the cost
+        # estimator prices each bucket instead of guessing. None when the SDK
+        # omits `usage.cache_creation` — the estimator then prices the aggregate
+        # at the 5-minute rate, as it always did.
+        "cache_creation_5m_input_tokens": _cache_creation_get(
+            usage, "ephemeral_5m_input_tokens"
+        ),
+        "cache_creation_1h_input_tokens": _cache_creation_get(
+            usage, "ephemeral_1h_input_tokens"
+        ),
         "stop_reason": getattr(final, "stop_reason", None),
     }
+    if extra:
+        span.metadata.update(extra)
 
 
 async def observe_tool(
@@ -431,3 +452,18 @@ def _usage_get(usage: Any, key: str) -> Any:
     if isinstance(usage, dict):
         return usage.get(key)
     return getattr(usage, key, None)
+
+
+def _cache_creation_get(usage: Any, key: str) -> Any:
+    """One field of the nested per-TTL cache-write split (CHO-278).
+
+    ``usage.cache_creation`` is an ``anthropic.types.CacheCreation`` model, but
+    tolerate a plain dict and a missing/None block — older SDK payloads and test
+    doubles have no split at all.
+    """
+    creation = _usage_get(usage, "cache_creation")
+    if creation is None:
+        return None
+    if isinstance(creation, dict):
+        return creation.get(key)
+    return getattr(creation, key, None)

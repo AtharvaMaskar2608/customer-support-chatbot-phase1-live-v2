@@ -314,6 +314,22 @@ def agent_max_tool_rounds() -> int:
     return int(os.environ.get("AGENT_MAX_TOOL_ROUNDS", "5"))
 
 
+def agent_history_cache() -> bool:
+    """Rolling prompt-cache breakpoint on the conversation history
+    (AGENT_HISTORY_CACHE env, default ON — CHO-264).
+
+    Gates ONLY the `cache_control` marker, never the message layout: the live
+    status line rides the trailing message unconditionally, so turning this off
+    restores the previous two-breakpoint request without touching assembly.
+    Default-on because the failure mode is a bounded input-cost regression, not
+    a correctness / latency / SSE change; the flag exists so a rollback is an
+    env flip and a container recreate rather than a rebuild.
+    """
+    return os.environ.get("AGENT_HISTORY_CACHE", "1").strip().lower() not in {
+        "0", "false", "no", "off",
+    }
+
+
 def anthropic_api_key() -> str | None:
     """Anthropic key for the agent loop (env, or repo-root .env in dev)."""
     return _secret("ANTHROPIC_API_KEY")
@@ -386,3 +402,22 @@ def trace_cost_usd_to_inr() -> float:
     except ValueError:
         return 96.46
     return value if value > 0 else 96.46
+
+
+# --- Model-facing context curation (CHO-271) ---------------------------------
+#
+# Read-time projection: spent tool_result payloads are replaced by authored
+# stubs before the request is sent (the lossless store is never mutated). This
+# is a behavioural change, so it earns a gate the caching work does not:
+# OFF at merge, flipped on per environment only after the CHO-276 routing
+# evals pass, and the default flips in a later commit. There is deliberately no
+# knob for how many turns stay verbatim — K is pinned to 1 per class in code.
+
+
+def agent_context_curation() -> bool:
+    """Curated messages_for_model view on/off (AGENT_CONTEXT_CURATION env,
+    default OFF until the CHO-276 routing evals pass on prod). With it off the
+    assembled messages array is byte-identical to the pre-change array."""
+    return os.environ.get("AGENT_CONTEXT_CURATION", "0").strip().lower() in {
+        "1", "true", "yes", "on",
+    }

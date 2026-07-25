@@ -31,7 +31,7 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 
 import asyncpg
 
@@ -52,6 +52,15 @@ QUEUE_MAX = 1000  # bounded: a wedged tunnel degrades persistence, not chat
 _BATCH_MAX = 50  # jobs drained per writer wake-up over one connection
 _DRAIN_TIMEOUT_SECONDS = 10.0
 _SHUTDOWN = object()
+
+# Prompt-cache breakpoint marker (CHO-264). Plain 5-minute ephemeral: no "ttl"
+# key anywhere — the 1h question needs the per-TTL rate table first (CHO-278).
+CACHE_CONTROL_EPHEMERAL: dict[str, Any] = {"type": "ephemeral"}
+
+# The API searches only this many recent content blocks for a readable cache
+# entry, so a breakpoint more than CACHE_LOOKBACK_BLOCKS - 1 blocks past the
+# last still-valid entry cannot read it back (CHO-264 · design D5).
+CACHE_LOOKBACK_BLOCKS = 20
 
 _SNAPSHOT_SQL = """
 INSERT INTO prompt_snapshots (hash, system, tools)
@@ -163,23 +172,40 @@ class Thread:
     # guards against re-fetching on every turn.
     first_name: str | None = None
     name_fetched: bool = False
+    # CHO-271: read-time curation cache (seq -> stubbed content blocks).
+    # Transient like first_name/name_fetched — derived from stored bytes,
+    # never persisted, and never a substitute for turn.content.
+    curated: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
 
     @property
     def next_seq(self) -> int:
         return self.turns[-1].seq + 1 if self.turns else 1
 
-    def messages(self) -> list[dict[str, Any]]:
+    def messages(
+        self,
+        *,
+        transform: Callable[[Turn], list[dict[str, Any]] | None] | None = None,
+    ) -> list[dict[str, Any]]:
         """Rebuild the wire-faithful Anthropic messages array. Consecutive
         user-role turns merge into ONE user-role message: tool_result runs
         (that is how they went over the wire after a parallel-tool assistant
         turn) and flow_event memos beside an adjacent user turn (CHO-214 —
         widget completions enter the transcript as framed app-event blocks;
         the roles must not collide on the wire). Turn sequences without flow
-        events produce exactly the pre-CHO-214 array."""
+        events produce exactly the pre-CHO-214 array.
+
+        `transform` (CHO-271) may return replacement content blocks for one
+        turn; None keeps the stored bytes. Callers that pass no transform get
+        the lossless array, byte-for-byte as before — which is why the merge
+        and tool_result-first partition live in this one place, so a curated
+        projection cannot drift from the wire shape."""
         messages: list[dict[str, Any]] = []
         for turn in self.turns:
+            content = (
+                transform(turn) if transform is not None else None
+            ) or turn.content
             if turn.role == "user" and messages and messages[-1]["role"] == "user":
-                merged = messages[-1]["content"] + list(turn.content)
+                merged = messages[-1]["content"] + list(content)
                 # The API requires tool_result blocks first in a user message;
                 # a flow_event landing mid-tool-round would otherwise precede
                 # them. Stable partition keeps order within each group.
@@ -187,8 +213,127 @@ class Thread:
                 others = [b for b in merged if b.get("type") != "tool_result"]
                 messages[-1]["content"] = results + others
             else:
-                messages.append({"role": turn.role, "content": list(turn.content)})
+                messages.append({"role": turn.role, "content": list(content)})
         return messages
+
+
+def last_user_message_index(thread: Thread) -> int | None:
+    """Index — into the array `thread.messages()` returns — of the message
+    holding the newest `user_text` turn, or None when the thread has none.
+
+    This is the conservative anchor for the deep-gap insurance marker
+    (CHO-264 · design D5): a turn's FIRST model call always marks the last
+    stored message, which at that moment is the message holding that turn's
+    user text — so an entry exists there by construction, for every turn, with
+    no persistent state to track. Later rounds of the same turn wrote newer
+    entries too; anchoring at the oldest one we can be sure of can only
+    over-estimate the gap, which costs at most one extra (readable) breakpoint,
+    whereas under-estimating it costs a full-history write at 1.25×.
+
+    Mirrors the merge accounting in `Thread.messages()`: consecutive user-role
+    turns share one message, so the index advances only on a role change.
+    """
+    index = -1
+    found: int | None = None
+    previous_role: str | None = None
+    for turn in thread.turns:
+        if not (turn.role == "user" and previous_role == "user"):
+            index += 1
+        previous_role = turn.role
+        if turn.kind == "user_text":
+            found = index
+    return found
+
+
+def _block_count(message: dict[str, Any]) -> int:
+    """Content blocks in one message — the unit the cache lookback counts in."""
+    content = message.get("content")
+    return len(content) if isinstance(content, list) else 1
+
+
+def _marked(message: dict[str, Any]) -> dict[str, Any] | None:
+    """A COPY of `message` whose last content block carries the ephemeral cache
+    breakpoint, or None when there is nothing markable.
+
+    Copy-on-mark is mandatory, not stylistic. `Thread.messages()` builds fresh
+    message dicts and fresh content LISTS, but the inner block dicts ARE the
+    stored `Turn.content` dicts (`messages[-1]["content"] + list(turn.content)`,
+    `results + others`, `list(turn.content)` above). An in-place
+    `block["cache_control"] = …` would therefore leak the marker into
+    `thread.turns` — and from there into the ticket transcript (the ticket core
+    renders from the same live Thread), into earlier requests already captured
+    by test doubles, and into a byte-drift against the DB rehydrate, which
+    serialises at enqueue time and re-canonicalises on read (⇒ a cache MISS
+    after every restart). Replacing the list slot with a copied block is safe
+    because the list itself is rebuilt on every `messages()` call.
+    """
+    content = message.get("content")
+    if not isinstance(content, list) or not content:
+        return None
+    block = content[-1]
+    if not isinstance(block, dict) or "cache_control" in block:
+        return None
+    marked_content = list(content)
+    marked_content[-1] = {**block, "cache_control": dict(CACHE_CONTROL_EPHEMERAL)}
+    return {**message, "content": marked_content}
+
+
+def with_history_breakpoint(
+    messages: list[dict[str, Any]], *, last_entry_index: int | None = None
+) -> list[dict[str, Any]]:
+    """The model-facing copy of a replayed messages array, carrying the rolling
+    prompt-cache breakpoint on the conversation tip (CHO-264 · design D3/D5).
+
+    `messages` must be the STORED history only — never the primed prefix and
+    never the trailing volatile message, neither of which may carry this
+    marker. The stored turns are left untouched: every marked message is
+    replaced by a copy (see `_marked`).
+
+    The tip marker rolls forward on every model call, so each round writes only
+    its own increment at 1.25× and the next round reads it at 0.1× (break-even
+    is 0.28 reads per write).
+
+    `last_entry_index` is the message index of the last still-valid cache entry
+    — the previous round's tip within a turn, or the last message of the
+    previous turn on a turn's first round. When the tip is more than
+    CACHE_LOOKBACK_BLOCKS - 1 content blocks past THAT entry, a second,
+    conditional breakpoint is placed on the deepest message still within reach
+    OF THE ENTRY (never measured back from the tip — a tip-anchored placement
+    lands past the entry and reads nothing). Below that distance no second
+    marker is placed, so a normal round carries exactly one.
+    """
+    if not messages:
+        return messages
+    marked = list(messages)
+    tip_index = len(marked) - 1
+    marked_tip = _marked(marked[tip_index])
+    if marked_tip is None:
+        return marked
+    marked[tip_index] = marked_tip
+
+    reach = CACHE_LOOKBACK_BLOCKS - 1
+    if last_entry_index is None or not 0 <= last_entry_index < tip_index:
+        return marked
+    gap = sum(
+        _block_count(marked[index])
+        for index in range(last_entry_index + 1, tip_index + 1)
+    )
+    if gap <= reach:
+        return marked
+    # Deepest message still within `reach` blocks of the last valid entry.
+    anchor_index: int | None = None
+    running = 0
+    for index in range(last_entry_index + 1, tip_index):
+        running += _block_count(marked[index])
+        if running > reach:
+            break
+        anchor_index = index
+    if anchor_index is None:
+        return marked
+    marked_anchor = _marked(marked[anchor_index])
+    if marked_anchor is not None:
+        marked[anchor_index] = marked_anchor
+    return marked
 
 
 class ThreadStore:

@@ -5,8 +5,11 @@ API (design D1). Every round streams (`client.messages.stream(...)`): text
 deltas are forwarded to the SSE response AS THEY ARRIVE, then
 `get_final_message()` decides continuation. Assistant and tool messages are
 fed back wire-faithfully through the conversation store — `thread.messages()`
-IS the messages param, so replay stays byte-identical (and Anthropic prompt
-caching warm).
+IS the history the messages param carries, so replay stays byte-identical. The
+model-facing array differs from that lossless replay only additively: a rolling
+`cache_control` breakpoint applied by copy-on-mark (CHO-264 —
+`store.with_history_breakpoint`, never a store mutation), the frozen primed
+prefix in front, and the single trailing live-context message behind.
 
 SSE contract (design D9, pinned with the frontend):
   text      {"delta": str}                      — streamed assistant text
@@ -37,7 +40,9 @@ from typing import Any, AsyncIterator
 
 from app import config, greeting
 from app.agent import caps as agent_caps
+from app.agent import curation as agent_curation
 from app.agent import prompt as agent_prompt
+from app.agent import store as agent_store
 from app.agent import tickets as agent_tickets
 from app.agent import tools as agent_tools
 from app.agent import tracing
@@ -92,13 +97,6 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n"
 
 
-def _reminder_message(text: str) -> dict:
-    """A trailing user-role system-reminder block. Appended at the END of the
-    messages array (never stored, never edits system) so the prompt-cache
-    prefix stays intact."""
-    return {"role": "user", "content": [{"type": "text", "text": text}]}
-
-
 def _block_to_dict(block: Any) -> dict | None:
     """SDK content block → the plain dict the store persists.
 
@@ -139,6 +137,25 @@ def _usage_dict(usage: Any) -> dict:
         value = getattr(usage, key, None)
         if value is not None:
             out[key] = value
+    # CHO-278: the per-TTL cache-write split lives one level down, on
+    # `usage.cache_creation` (anthropic.types.CacheCreation). The flat key above
+    # is its inclusive sum and carries no TTL, but a 1-hour write bills at 2x
+    # base input against 1.25x for 5 minutes — so the cost estimator needs the
+    # split. Absent on older SDK payloads and on test doubles; then the flat
+    # total alone is stored, exactly as before.
+    creation = getattr(usage, "cache_creation", None)
+    if creation is not None:
+        for out_key, attr in (
+            ("cache_creation_5m_input_tokens", "ephemeral_5m_input_tokens"),
+            ("cache_creation_1h_input_tokens", "ephemeral_1h_input_tokens"),
+        ):
+            value = (
+                creation.get(attr)
+                if isinstance(creation, dict)
+                else getattr(creation, attr, None)
+            )
+            if value is not None:
+                out[out_key] = value
     return out
 
 
@@ -271,6 +288,13 @@ async def _chat_events(
             client_code=ctx.client_code,
         )
         thread.name_fetched = True
+    # CHO-264 · design D5: where the last still-valid history cache entry sits,
+    # for the deep-gap insurance marker. On this turn's FIRST round the anchor is
+    # the previous turn's round-1 tip — the message holding the newest user_text
+    # turn, which that turn's first model call marked by construction — so it is
+    # read BEFORE the new user turn is appended. From round 2 on it is the marker
+    # this turn placed on the previous round. No new persistent state.
+    last_entry_index = agent_store.last_user_message_index(thread)
     store.append_turn(
         thread,
         role="user",
@@ -292,29 +316,67 @@ async def _chat_events(
         escalation_reminder = None
     auth_expired = False
     rounds = 0
+    # CHO-264: model + thinking are resolved ONCE per turn, not per round. Read
+    # per round, an env flip mid-turn would split one turn across two models —
+    # cache entries are model-scoped, so every tier drops — and would
+    # mis-record turns.meta.model.
+    model = config.agent_model()
+    thinking_params = config.agent_thinking_params(model, config.agent_thinking())
+    # Playground drafts stay uncached (either override already drops the system
+    # and primed breakpoints), so they skip the history marker too.
+    history_cache = (
+        config.agent_history_cache()
+        and system_override is None
+        and primed_override is None
+    )
 
     while True:
         force_wrapup = rounds >= config.agent_max_tool_rounds()
-        messages = (
-            agent_prompt.primed_messages(
-                first_name=thread.first_name,
-                instructions_override=primed_override,
-            )
-            + thread.messages()
+        # CHO-271: the ONE curation seam. Read-time projection only — the store
+        # is never mutated, so flag off ⇒ byte-identical to thread.messages().
+        curating = config.agent_context_curation()
+        history = (
+            agent_curation.messages_for_model(thread)
+            if curating
+            else thread.messages()
         )
-        if escalation_reminder is not None:
-            messages.append(_reminder_message(escalation_reminder))
-        if force_wrapup:
-            messages.append(_reminder_message(_WRAPUP_REMINDER))
+        # CHO-264: the marker is applied to the replayed history alone — and,
+        # when curation is on, to the ALREADY-CURATED history, so the breakpoint
+        # always marks the exact bytes that go on the wire. It runs before the
+        # primed prefix and the trailing message are concatenated, so it
+        # structurally cannot land on either. Skipped on the wrap-up round:
+        # tool_choice:none changes the messages-tier cache key, so that write
+        # could not be read back.
+        if history_cache and not force_wrapup:
+            history = agent_store.with_history_breakpoint(
+                history, last_entry_index=last_entry_index
+            )
+            last_entry_index = len(history) - 1
+        reminders = [
+            text
+            for text in (
+                escalation_reminder,
+                _WRAPUP_REMINDER if force_wrapup else None,
+            )
+            if text is not None
+        ]
+        messages = (
+            agent_prompt.primed_messages(instructions_override=primed_override)
+            + history
+            + [
+                agent_prompt.trailing_context_message(
+                    first_name=thread.first_name, reminders=reminders
+                )
+            ]
+        )
 
-        model = config.agent_model()
         kwargs: dict = {
             "model": model,
             "max_tokens": config.agent_max_tokens(),
             "system": agent_prompt.system_blocks(override=system_override),
             "tools": agent_tools.tool_schemas(),
             "messages": messages,
-            **config.agent_thinking_params(model, config.agent_thinking()),
+            **thinking_params,
         }
         if force_wrapup:
             kwargs["tool_choice"] = {"type": "none"}
@@ -331,6 +393,18 @@ async def _chat_events(
                 user_input=message,
                 open_stream=lambda: client.messages.stream(**kwargs),
                 holder=holder,
+                # CHO-271: counts only, so the flag's effect is visible in the
+                # trace viewer without a special run. Never any message text.
+                extra={
+                    "curated_turns": (
+                        agent_curation.curated_turn_count(thread)
+                        if curating
+                        else 0
+                    ),
+                    "history_tokens_est": agent_curation.history_tokens_est(
+                        history
+                    ),
+                },
             ):
                 yield _sse("text", {"delta": delta})
             final = holder["final"]

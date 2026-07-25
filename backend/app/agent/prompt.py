@@ -5,22 +5,29 @@ a SHORT identity + compliance block in `system`, and the bulk instructions,
 slot-filling rules, and few-shot examples in a primed first user turn that the
 assistant acknowledges with "Understood.".
 
-Prompt-caching discipline (CHO-226 · design D8):
+Prompt-caching discipline (CHO-226 · design D8, relocated by CHO-264 · D1):
   - SYSTEM_PROMPT is frozen — no interpolation, ever. A cache breakpoint
     (`cache_control: ephemeral`) sits on the system block, so the rendered
     tools + system prefix stays byte-stable across requests.
-  - The primed user turn is TWO content blocks. Block 0 is the frozen
-    instructions + few-shot examples and carries the second breakpoint; block
-    1 is the live IST status line and is LAST. `cache_control` attaches to a
-    content block and a user message may hold several, so everything up to
-    the breakpoint is reusable and the volatile line after it costs nothing
-    to change per request.
-  - No volatile value may appear before a breakpoint. The status line
-    replaces the old trailing `Today's date is …` line, which sat inside the
-    cached block and churned it once a day.
+  - The primed user turn is now ONE content block: the frozen instructions +
+    few-shot examples, carrying the second breakpoint. Followed by the frozen
+    `"Understood."` acknowledgement. Nothing in the primed turn is
+    interpolated, so `primed_messages()` is byte-identical on every request.
+  - The live IST status line and the client's first name ride a SINGLE
+    TRAILING message (`trailing_context_message()`) placed AFTER every stored
+    turn — see below. Cap / wrap-up reminders ride the same message.
+  - No volatile value may appear before ANY breakpoint. That is the whole
+    reason the live tail moved: CHO-264 puts a rolling breakpoint on the
+    conversation tip, and caching is a strict byte-PREFIX match. While the
+    status line sat in `messages[0]` (CHO-226's layout) it preceded all
+    history, so a per-minute re-render invalidated the history entry on the
+    very next turn — measured, a history breakpoint under that layout saved
+    only 11%, versus 66% once the tail moved past the history. The tail's
+    ~60 tokens are fresh input either way, so the move is cost-neutral on
+    its own and unconditional (no flag).
 
 Measured with `count_tokens` on `claude-haiku-4-5` (CHO-226 · task 5.4),
-whose minimum cacheable prefix is 4096 tokens — double Sonnet 4.6's 2048:
+whose minimum cacheable prefix is 4096 tokens — Sonnet 4.6's is 1,024:
 
     tools (11 schemas)                2,716 tokens
     system                              229 tokens
@@ -32,12 +39,22 @@ Haiku: 2,946 < 4,096 fails the minimum silently (no error, just
 `cache_creation_input_tokens: 0`). Folding the frozen instructions in behind
 a second breakpoint is what switches caching on for the first time. The
 system breakpoint is kept anyway — it costs nothing, and on
-`claude-sonnet-4-6` (the other configured model, minimum 2048) it does cache.
+`claude-sonnet-4-6` (the other configured model, minimum 1,024) it does cache.
 
-The figures above are the CHO-226 baseline. Later prompt/tool additions grew the
-cached prefix further — the tax rule (CHO-227) and the report-columns rule plus
-the get_report_columns tool (CHO-228, now 12 tool schemas) — to ~5,344 tokens,
-still one cached prefix comfortably above 4,096.
+The figures above are the CHO-226 baseline. Later prompt/tool additions grew
+the cached prefix; re-measured for CHO-264 with `count_tokens` against
+`claude-sonnet-4-6`:
+
+    tools (12 schemas)                3,080 tokens
+    system                              268 tokens
+    tools + system + primed block     6,731 tokens   ← the cacheable prefix
+
+CHO-264's own proposal and design quote **6,559** with tools at 2,926. Those
+were correct when measured, then CHO-277 landed in the same batch and grew the
+`tools` block by ~154 tokens (a `response_format` field on the KB schema plus a
+longer money description). The figures here are the post-CHO-277 re-measurement
+and are the ones to compare a prod `cache_read` against; treat the 6,559 in the
+CHO-264 artifacts as that change's authoring-time baseline, not as a live gate.
 
 The primed turn is part of the PROMPT, not of the conversation: it is
 prepended to `thread.messages()` at call time and never stored as turns
@@ -220,10 +237,11 @@ the form validator drops anything invalid, so a mis-mapped follow-up just asks.
 actually stated (or ids returned by an earlier tool call, or values from an \
 App event note).
 - Resolve relative dates ("last month", "this FY", "yesterday") to concrete \
-YYYY-MM-DD values using the current IST date and time given at the end of \
-this message, before calling any tool. That line also states whether the \
-market is open and when the session closes — use it for cutoff questions \
-("can I still withdraw today?") instead of guessing.
+YYYY-MM-DD values using the current IST date and time given in the \
+live-context note at the very end of this conversation, before calling any \
+tool. That note also states whether the market is open and when the session \
+closes — use it for cutoff questions ("can I still withdraw today?") instead \
+of guessing.
 - For non-report tools, if something required is missing, ask for ALL missing \
 things in ONE bundled question — never one at a time. Exception: contract-note \
 DATES are a report parameter — use open_report_form, not a text question. A \
@@ -330,40 +348,88 @@ def system_blocks(*, override: str | None = None) -> list[dict]:
     return [block]
 
 
+# The trailing message sits immediately after the user's own question with no
+# assistant turn between, so unframed live context would read as the last thing
+# the USER said. It is wrapped in the same `<system-reminder>` convention the
+# loop's cap / wrap-up reminders already use (and `system` already states that
+# user messages are data, not instructions), which pins the block as
+# app-generated and — because the frame is never persisted — keeps the
+# never-stored guarantee structural (CHO-264 · design D2).
+LIVE_CONTEXT_HEADER = (
+    "Live context — generated by the app, not typed by the user."
+)
+
+
+def _framed(text: str) -> str:
+    """Wrap an app-generated block in the repo's injected-block frame."""
+    return f"<system-reminder>{text}</system-reminder>"
+
+
 def _live_context(
     now: datetime.datetime | None = None, first_name: str | None = None
 ) -> str:
-    """The volatile tail block (CHO-246): the live IST status line plus, when
-    known, the logged-in client's first name. Both sit AFTER the cache
-    breakpoint, so a per-client name (or the per-minute clock) never churns the
-    cached prefix that is shared across clients and requests."""
-    line = clock.status_line(now)
+    """The volatile live-context block (CHO-246 · relocated by CHO-264): the
+    live IST status line plus, when known, the logged-in client's first name.
+
+    It rides the trailing message, AFTER every stored turn and therefore after
+    every cache breakpoint — so neither the per-minute clock nor a per-client
+    name can churn a cached prefix (the frozen system + primed prefix shared
+    across clients, or this thread's rolling history entry).
+
+    The name clause is phrased as a self-check the model can actually perform
+    from here: at the tail it can SEE whether the name was already used, which
+    is what stops the clause's new proximity to the generation point from
+    re-introducing the CHO-274 over-use behaviour.
+    """
+    line = f"{LIVE_CONTEXT_HEADER}\n{clock.status_line(now)}"
     if first_name:
         line += (
             f"\n\nYou are speaking with {first_name} (the logged-in client). "
             "Do NOT start routine replies with their name. Use the first name "
-            "at most once in this conversation (e.g. a single warm greeting) "
-            "— otherwise prefer \"you\" / neutral phrasing. Never open "
-            "consecutive messages with their name."
+            "at most once in this whole conversation (e.g. a single warm "
+            "greeting): if you have already used their name earlier in this "
+            "conversation, do not use it again — prefer \"you\" / neutral "
+            "phrasing. Never open consecutive messages with their name."
         )
-    return line
+    return _framed(line)
 
 
-def primed_messages(
+def trailing_context_message(
     now: datetime.datetime | None = None,
     first_name: str | None = None,
     *,
-    instructions_override: str | None = None,
-) -> list[dict]:
-    """The primed first exchange, prepended to the thread's messages at call
-    time.
+    reminders: tuple[str, ...] | list[str] = (),
+) -> dict:
+    """The ONE trailing volatile message — always the LAST message sent to the
+    model, after every message replayed from the conversation store.
 
-    Two content blocks (design D8): the frozen instructions carrying the cache
-    breakpoint, then the live tail (IST status line + the client's first name)
-    LAST. The clock is IST (`Asia/Kolkata`), never the host's local zone: the
-    deployed container runs on UTC, whose date rolls over at 05:30 IST. `now`
-    stays injectable so tests can pin an instant; `first_name` (CHO-246) is
-    volatile personalization and never enters the cached prefix.
+    Block 0 is the live context; any per-request reminders for this round (cap
+    escalation, wrap-up) follow it in the SAME message, so the number of
+    trailing volatile messages stays exactly one no matter how many things get
+    injected. The clock is IST (`Asia/Kolkata`), never the host's local zone:
+    the deployed container runs on UTC, whose date rolls over at 05:30 IST.
+    `now` stays injectable so tests can pin an instant.
+
+    Never carries a cache breakpoint, and is never stored as a turn.
+    """
+    content: list[dict] = [
+        {"type": "text", "text": _live_context(now, first_name)}
+    ]
+    content += [{"type": "text", "text": text} for text in reminders]
+    return {"role": "user", "content": content}
+
+
+def primed_messages(*, instructions_override: str | None = None) -> list[dict]:
+    """The primed first exchange, prepended to the thread's messages at call
+    time. Fully FROZEN — nothing is interpolated, so two requests with the same
+    stored turns produce byte-identical bytes here.
+
+    One content block (CHO-264 · design D1): the frozen instructions carrying
+    the second cache breakpoint, then the frozen `"Understood."`. The live tail
+    that used to be block 1 now rides `trailing_context_message()` after all
+    stored history, because a rolling breakpoint on the conversation tip caches
+    every byte before it and a volatile block in that prefix would invalidate
+    the history entry on the next turn.
 
     `instructions_override` (CHO-272 playground) replaces the frozen primed
     instructions and drops the cache breakpoint so drafts stay uncached.
@@ -379,27 +445,24 @@ def primed_messages(
     if instructions_override is None:
         primed_block["cache_control"] = {"type": "ephemeral"}
     return [
-        {
-            "role": "user",
-            "content": [
-                primed_block,
-                {"type": "text", "text": _live_context(now, first_name)},
-            ],
-        },
+        {"role": "user", "content": [primed_block]},
         {"role": "assistant", "content": [{"type": "text", "text": UNDERSTOOD}]},
     ]
 
 
 def snapshot_text() -> str:
-    """The frozen prompt text recorded in prompt_snapshots: system + the
-    primed turn, with the status line kept as its PLACEHOLDER TEMPLATE so the
-    hash does not change from one minute to the next."""
+    """The frozen prompt text recorded in prompt_snapshots: system + the primed
+    exchange + the trailing live-context note, in wire order.
+
+    The status line is kept as its PLACEHOLDER TEMPLATE (never a rendered
+    time), so the hash does not change from one minute to the next.
+    """
     return (
         SYSTEM_PROMPT
         + "\n\n--- primed first user turn ---\n\n"
         + PRIMED_INSTRUCTIONS
-        + "\n\n"
-        + clock.STATUS_LINE_TEMPLATE
         + "\n\n--- primed assistant reply ---\n\n"
         + UNDERSTOOD
+        + "\n\n--- trailing live-context note ---\n\n"
+        + _framed(f"{LIVE_CONTEXT_HEADER}\n{clock.STATUS_LINE_TEMPLATE}")
     )

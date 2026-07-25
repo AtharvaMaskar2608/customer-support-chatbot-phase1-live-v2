@@ -22,7 +22,12 @@ import logging
 import pytest
 
 from app import clock, greeting
-from app.agent.prompt import PRIMED_INSTRUCTIONS, primed_messages, snapshot_text
+from app.agent.prompt import (
+    PRIMED_INSTRUCTIONS,
+    primed_messages,
+    snapshot_text,
+    trailing_context_message,
+)
 
 IST = clock.IST
 
@@ -390,35 +395,45 @@ def test_utc_datetimes_are_converted_before_matching():
     assert clock.market_state(utc).greeting_key == clock.KEY_MARKET
 
 
-# --- prompt: two blocks, live line last (5.1–5.3) -----------------------------
+# --- prompt: frozen primed turn, live line in the trailing message ------------
+# (CHO-226 5.1–5.3, retargeted by CHO-264 D1: the live tail moved out of the
+# primed turn to a single trailing message placed after all stored history.)
 
 
-def test_primed_turn_is_two_blocks_with_the_live_line_last():
-    blocks = primed_messages(at(2026, 7, 20, 14, 47))[0]["content"]
-    assert [b["type"] for b in blocks] == ["text", "text"]
+def test_primed_turn_is_one_frozen_block():
+    blocks = primed_messages()[0]["content"]
+    assert [b["type"] for b in blocks] == ["text"]
     assert blocks[0]["text"] == PRIMED_INSTRUCTIONS
-    assert blocks[1]["text"].startswith("Right now it is ")
+
+
+def test_trailing_message_carries_the_live_line_first():
+    content = trailing_context_message(at(2026, 7, 20, 14, 47))["content"]
+    assert [b["type"] for b in content] == ["text"]
+    assert "Right now it is " in content[0]["text"]
 
 
 def test_cache_breakpoint_sits_on_the_frozen_block_only():
-    blocks = primed_messages(at(2026, 7, 20, 14, 47))[0]["content"]
+    blocks = primed_messages()[0]["content"]
     assert blocks[0]["cache_control"] == {"type": "ephemeral"}
-    assert "cache_control" not in blocks[1]
+    trailing = trailing_context_message(at(2026, 7, 20, 14, 47))["content"]
+    assert all("cache_control" not in block for block in trailing)
 
 
 def test_no_volatile_value_appears_before_the_breakpoint():
-    """Two requests minutes apart: every block up to and including the
-    breakpoint is byte-identical; only the final block differs."""
-    first = primed_messages(at(2026, 7, 20, 14, 47))[0]["content"]
-    second = primed_messages(at(2026, 7, 20, 14, 52))[0]["content"]
-    assert first[0] == second[0]
-    assert first[1] != second[1]
+    """The primed turn is now FROZEN: two requests minutes apart produce
+    byte-identical primed messages, and only the trailing message differs.
+    (Strengthened across the whole array by
+    test_only_the_trailing_message_is_volatile in test_agent_loop.py.)"""
+    assert primed_messages() == primed_messages()
+    first = trailing_context_message(at(2026, 7, 20, 14, 47))
+    second = trailing_context_message(at(2026, 7, 20, 14, 52))
+    assert first != second
 
 
 def test_frozen_block_carries_no_rendered_clock():
     """The few-shot examples do contain literal dates; what must never appear
     is the *current* clock, which is what would churn the cache."""
-    text = primed_messages(at(2026, 7, 20, 14, 47))[0]["content"][0]["text"]
+    text = primed_messages()[0]["content"][0]["text"]
     for volatile in ("Right now", "Today's date", "20 July", "2:47 pm", "Monday"):
         assert volatile not in text
 
@@ -427,22 +442,30 @@ def test_snapshot_keeps_placeholders_so_the_hash_is_time_stable():
     text = snapshot_text()
     assert clock.STATUS_LINE_TEMPLATE in text
     assert "{time}" in text and "{date}" in text and "{market}" in text
+    assert "--- trailing live-context note ---" in text
     # Two snapshots minutes apart are identical by construction.
     assert snapshot_text() == text
 
 
 def test_first_name_rides_the_volatile_block_not_the_cached_prefix():
-    """CHO-246: the client's first name appears only in the post-breakpoint
-    tail block, never in the cached instructions — so per-client names never
-    churn the shared cached prefix."""
-    blocks = primed_messages(at(2026, 7, 20, 14, 47), first_name="Harsha")[0]["content"]
-    assert "Harsha" not in blocks[0]["text"]
-    assert "Harsha" in blocks[1]["text"]
+    """CHO-246: the client's first name appears only in the trailing volatile
+    block, never in the cached instructions — so per-client names never churn
+    the shared cached prefix (nor this thread's history cache entry)."""
+    frozen = primed_messages()[0]["content"][0]["text"]
+    tail = trailing_context_message(
+        at(2026, 7, 20, 14, 47), first_name="Harsha"
+    )["content"][0]["text"]
+    assert "Harsha" not in frozen
+    assert "Harsha" in tail
     # CHO-274: rare use — not "address them by first name when it reads naturally".
-    assert "at most once" in blocks[1]["text"]
-    assert "Do NOT start routine replies with their name" in blocks[1]["text"]
+    assert "at most once" in tail
+    assert "Do NOT start routine replies with their name" in tail
+    # CHO-264: reworded as a self-check the model can run from the tail, where
+    # it can SEE whether the name was already used.
+    assert "already used their name earlier in this conversation" in tail
+    assert "Never open consecutive messages with their name" in tail
     # No name → the tail is just the status line (no dangling name text).
-    plain = primed_messages(at(2026, 7, 20, 14, 47))[0]["content"][1]["text"]
+    plain = trailing_context_message(at(2026, 7, 20, 14, 47))["content"][0]["text"]
     assert "speaking with" not in plain
 
 
