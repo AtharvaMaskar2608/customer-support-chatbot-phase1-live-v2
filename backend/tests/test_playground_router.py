@@ -2,6 +2,7 @@
 production /api/chat. No model calls — these tests stay offline.
 """
 
+import json
 from contextlib import contextmanager
 
 import pytest
@@ -88,11 +89,76 @@ def test_prompt_override_helpers_drop_cache_control():
     assert draft_sys[0]["text"] == "experimental system"
     assert "cache_control" not in draft_sys[0]
 
+    # CHO-264: the primed turn is now a SINGLE block (the live tail moved to
+    # the trailing message), so the override replaces the whole turn's content.
     prod_primed = agent_prompt.primed_messages()
+    assert len(prod_primed[0]["content"]) == 1
     assert "cache_control" in prod_primed[0]["content"][0]
     draft = agent_prompt.primed_messages(instructions_override="draft primed")
+    assert len(draft[0]["content"]) == 1
     assert draft[0]["content"][0]["text"] == "draft primed"
     assert "cache_control" not in draft[0]["content"][0]
+
+
+def test_playground_overrides_drop_history_breakpoint(app_no_db, monkeypatch):
+    """CHO-264: drafts stay uncached — an override request places no rolling
+    history breakpoint either, so nothing of an operator's in-flight draft
+    prefix is written to the cache."""
+    calls: list[dict] = []
+
+    class _FakeStream:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        @property
+        def text_stream(self):
+            async def gen():
+                yield "ok"
+
+            return gen()
+
+        async def get_final_message(self):
+            class _Msg:
+                content = [{"type": "text", "text": "ok"}]
+                stop_reason = "end_turn"
+                model = "claude-sonnet-4-6"
+                usage = {"input_tokens": 1, "output_tokens": 1}
+
+            return _Msg()
+
+    class _FakeMessages:
+        def stream(self, **kwargs):
+            calls.append(kwargs)
+            return _FakeStream()
+
+    class _FakeAnthropic:
+        messages = _FakeMessages()
+
+    app_no_db.state.anthropic_client = _FakeAnthropic()
+
+    with _client(app_no_db, monkeypatch, token=TOKEN) as client:
+        res = client.post(
+            "/api/playground/chat",
+            json={"message": "hi", "systemPrompt": "draft system"},
+            headers={
+                "Authorization": "jwt-token",
+                "X-Session-Id": "finx-live-session",
+                "X-User-Id": "X008593",
+                "X-Playground-Token": TOKEN,
+            },
+        )
+        assert res.status_code == 200
+        res.read()
+
+    assert calls, "the playground stream never reached the model"
+    messages = calls[0]["messages"]
+    # messages[0:2] is the primed exchange (its own breakpoint is governed by
+    # primedInstructions, untouched here); everything from the replayed history
+    # onward must be unmarked.
+    assert "cache_control" not in json.dumps(messages[2:])
 
 
 def test_playground_chat_keeps_finx_session_id_on_tool_ctx(app_no_db, monkeypatch):
