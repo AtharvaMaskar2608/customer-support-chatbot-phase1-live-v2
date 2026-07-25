@@ -31,7 +31,7 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 
 import asyncpg
 
@@ -172,23 +172,40 @@ class Thread:
     # guards against re-fetching on every turn.
     first_name: str | None = None
     name_fetched: bool = False
+    # CHO-271: read-time curation cache (seq -> stubbed content blocks).
+    # Transient like first_name/name_fetched — derived from stored bytes,
+    # never persisted, and never a substitute for turn.content.
+    curated: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
 
     @property
     def next_seq(self) -> int:
         return self.turns[-1].seq + 1 if self.turns else 1
 
-    def messages(self) -> list[dict[str, Any]]:
+    def messages(
+        self,
+        *,
+        transform: Callable[[Turn], list[dict[str, Any]] | None] | None = None,
+    ) -> list[dict[str, Any]]:
         """Rebuild the wire-faithful Anthropic messages array. Consecutive
         user-role turns merge into ONE user-role message: tool_result runs
         (that is how they went over the wire after a parallel-tool assistant
         turn) and flow_event memos beside an adjacent user turn (CHO-214 —
         widget completions enter the transcript as framed app-event blocks;
         the roles must not collide on the wire). Turn sequences without flow
-        events produce exactly the pre-CHO-214 array."""
+        events produce exactly the pre-CHO-214 array.
+
+        `transform` (CHO-271) may return replacement content blocks for one
+        turn; None keeps the stored bytes. Callers that pass no transform get
+        the lossless array, byte-for-byte as before — which is why the merge
+        and tool_result-first partition live in this one place, so a curated
+        projection cannot drift from the wire shape."""
         messages: list[dict[str, Any]] = []
         for turn in self.turns:
+            content = (
+                transform(turn) if transform is not None else None
+            ) or turn.content
             if turn.role == "user" and messages and messages[-1]["role"] == "user":
-                merged = messages[-1]["content"] + list(turn.content)
+                merged = messages[-1]["content"] + list(content)
                 # The API requires tool_result blocks first in a user message;
                 # a flow_event landing mid-tool-round would otherwise precede
                 # them. Stable partition keeps order within each group.
@@ -196,7 +213,7 @@ class Thread:
                 others = [b for b in merged if b.get("type") != "tool_result"]
                 messages[-1]["content"] = results + others
             else:
-                messages.append({"role": turn.role, "content": list(turn.content)})
+                messages.append({"role": turn.role, "content": list(content)})
         return messages
 
 

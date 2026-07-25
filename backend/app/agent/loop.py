@@ -40,6 +40,7 @@ from typing import Any, AsyncIterator
 
 from app import config, greeting
 from app.agent import caps as agent_caps
+from app.agent import curation as agent_curation
 from app.agent import prompt as agent_prompt
 from app.agent import store as agent_store
 from app.agent import tickets as agent_tickets
@@ -331,12 +332,21 @@ async def _chat_events(
 
     while True:
         force_wrapup = rounds >= config.agent_max_tool_rounds()
-        # The marker is applied to the REPLAYED history alone, before the primed
-        # prefix and the trailing message are concatenated — so it structurally
-        # cannot land on either. Skipped on the wrap-up round: tool_choice:none
-        # changes the messages-tier cache key, so that write could not be read
-        # back.
-        history = thread.messages()
+        # CHO-271: the ONE curation seam. Read-time projection only — the store
+        # is never mutated, so flag off ⇒ byte-identical to thread.messages().
+        curating = config.agent_context_curation()
+        history = (
+            agent_curation.messages_for_model(thread)
+            if curating
+            else thread.messages()
+        )
+        # CHO-264: the marker is applied to the replayed history alone — and,
+        # when curation is on, to the ALREADY-CURATED history, so the breakpoint
+        # always marks the exact bytes that go on the wire. It runs before the
+        # primed prefix and the trailing message are concatenated, so it
+        # structurally cannot land on either. Skipped on the wrap-up round:
+        # tool_choice:none changes the messages-tier cache key, so that write
+        # could not be read back.
         if history_cache and not force_wrapup:
             history = agent_store.with_history_breakpoint(
                 history, last_entry_index=last_entry_index
@@ -383,6 +393,18 @@ async def _chat_events(
                 user_input=message,
                 open_stream=lambda: client.messages.stream(**kwargs),
                 holder=holder,
+                # CHO-271: counts only, so the flag's effect is visible in the
+                # trace viewer without a special run. Never any message text.
+                extra={
+                    "curated_turns": (
+                        agent_curation.curated_turn_count(thread)
+                        if curating
+                        else 0
+                    ),
+                    "history_tokens_est": agent_curation.history_tokens_est(
+                        history
+                    ),
+                },
             ):
                 yield _sse("text", {"delta": delta})
             final = holder["final"]

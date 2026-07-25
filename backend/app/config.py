@@ -402,3 +402,22 @@ def trace_cost_usd_to_inr() -> float:
     except ValueError:
         return 96.46
     return value if value > 0 else 96.46
+
+
+# --- Model-facing context curation (CHO-271) ---------------------------------
+#
+# Read-time projection: spent tool_result payloads are replaced by authored
+# stubs before the request is sent (the lossless store is never mutated). This
+# is a behavioural change, so it earns a gate the caching work does not:
+# OFF at merge, flipped on per environment only after the CHO-276 routing
+# evals pass, and the default flips in a later commit. There is deliberately no
+# knob for how many turns stay verbatim — K is pinned to 1 per class in code.
+
+
+def agent_context_curation() -> bool:
+    """Curated messages_for_model view on/off (AGENT_CONTEXT_CURATION env,
+    default OFF until the CHO-276 routing evals pass on prod). With it off the
+    assembled messages array is byte-identical to the pre-change array."""
+    return os.environ.get("AGENT_CONTEXT_CURATION", "0").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
