@@ -7,6 +7,7 @@ equivalence for P&L (route vs dispatch → same envelope).
 """
 
 import asyncio
+import datetime
 import json
 
 import httpx
@@ -316,3 +317,189 @@ def test_dispatch_ignores_credential_shaped_input(monkeypatch):
     assert sent["UserId"] == CLIENT_CODE
     assert sent["SessionId"] == SESSION_ID
     assert "EVIL01" not in json.dumps(sent)
+
+
+# --- CHO-277: the model-facing projection seam --------------------------------
+#
+# `Tool.model_view` shapes the tool_result `content` only. `DispatchOutcome.
+# envelope` is ALWAYS the unprojected result, which is what loop.py's
+# `_artifact_payload` reads — so the pinned SSE artifact contract cannot move.
+# (The loop-level assertion lives here rather than in test_agent_loop.py, which
+# two sibling changes own.)
+
+MONEY_ROWS = 72
+
+
+def _money_upstream(indices: range, list_key: str) -> httpx.Response:
+    """Rows on strictly decreasing timestamps (index 0 = newest), so the two
+    directions interleave deterministically in the merged stream."""
+    base = datetime.datetime(2026, 7, 20, 12, 0, 0)
+    rows = [
+        {
+            "Amount": 100.0 + i,
+            "Status": "SUCCESS",
+            "RequestedDateTime": (
+                base - datetime.timedelta(minutes=i)
+            ).isoformat(),
+            "ModeOfPayment": "UPI",
+            "DepositBankName": "ICICI NSE CLIENT A/C - 000405107280",
+            "ClientBankName": "HDFC",
+            "ClientBankAccNo": "50100218008829",
+            "VoucherNo": f"V{i}",
+            "Reason": "",
+        }
+        for i in indices
+    ]
+    return httpx.Response(
+        200,
+        json={
+            "Status": "Success",
+            "Response": {list_key: rows, "TotalCount": [{"TotalRecords": len(rows)}]},
+            "Reason": "",
+        },
+    )
+
+
+def _mock_money(count: int = MONEY_ROWS) -> None:
+    respx.post(config.upstream_payin_url()).mock(
+        return_value=_money_upstream(range(0, count, 2), "PayInTxn")
+    )
+    respx.post(config.upstream_payout_url()).mock(
+        return_value=_money_upstream(range(1, count, 2), "PayOutTxn")
+    )
+
+
+def _money_outcome():
+    async def scenario():
+        async with httpx.AsyncClient() as http:
+            return await agent_tools.dispatch_outcome(
+                "get_money_transactions", {}, _ctx(http)
+            )
+
+    return asyncio.run(scenario())
+
+
+def test_tools_without_a_model_view_serialize_the_envelope_verbatim():
+    """The seam defaults to identity — only money opts in today."""
+    opted_in = {
+        t.name for t in agent_tools._TOOL_LIST if t.model_view is not None
+    }
+    assert opted_in == {"get_money_transactions"}
+
+
+@respx.mock
+def test_money_model_view_bounds_content_but_not_the_envelope():
+    _mock_money()
+
+    outcome = _money_outcome()
+
+    assert outcome.is_error is False
+    model_payload = json.loads(outcome.content)
+    # what the model reads: capped rows + shown/total + the omission note
+    assert len(model_payload["txns"]) == 25
+    assert model_payload["txnsShown"] == 25
+    assert model_payload["txnsTotal"] == MONEY_ROWS
+    assert "note" in model_payload
+    # what the frontend renders: every row, and none of the projection's keys
+    assert len(outcome.envelope["txns"]) == MONEY_ROWS
+    assert not {"txnsShown", "txnsTotal", "note"} & set(outcome.envelope)
+
+
+@respx.mock
+def test_artifact_payload_still_carries_every_row():
+    """loop.py builds the SSE `data` artifact from `outcome.envelope`, so the
+    card is unaffected by the projection — asserted through the real function."""
+    from app.agent.loop import _artifact_payload
+
+    _mock_money()
+    outcome = _money_outcome()
+
+    artifact = _artifact_payload("get_money_transactions", outcome)
+
+    assert artifact["kind"] == "data"
+    assert artifact["tool"] == "get_money_transactions"
+    assert len(artifact["txns"]) == MONEY_ROWS
+    assert "txnsShown" not in artifact and "note" not in artifact
+
+
+@respx.mock
+def test_model_view_never_touches_an_error_result(monkeypatch):
+    """A failure message IS the corrective instruction to the model — it must
+    reach the transcript verbatim, never through a projection."""
+    calls = []
+
+    def spy(envelope):
+        calls.append(envelope)
+        return {"kind": "ok"}
+
+    monkeypatch.setattr(
+        agent_tools.TOOLS["get_money_transactions"], "model_view", spy
+    )
+    respx.post(config.upstream_payin_url()).mock(return_value=httpx.Response(401))
+    respx.post(config.upstream_payout_url()).mock(return_value=httpx.Response(500))
+
+    outcome = _money_outcome()
+
+    assert outcome.is_error is True
+    assert outcome.error_code == CODE_AUTH_EXPIRED
+    assert "sign in" in outcome.content
+    assert outcome.envelope is None
+    assert calls == []
+
+
+def test_model_view_is_bypassed_for_unknown_tool_and_handler_exception(monkeypatch):
+    calls = []
+
+    def spy(envelope):
+        calls.append(envelope)
+        return envelope
+
+    async def boom(params, ctx):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(agent_tools.TOOLS["get_holdings"], "model_view", spy)
+    monkeypatch.setattr(agent_tools.TOOLS["get_holdings"], "handler", boom)
+
+    assert asyncio.run(_dispatch("no_such_tool", {}))[1] is True
+    assert asyncio.run(_dispatch("get_holdings", {}))[1] is True
+    assert calls == []
+
+
+@respx.mock
+def test_a_raising_model_view_degrades_to_the_full_envelope(monkeypatch, caplog):
+    """A projection bug must cost tokens, never a healthy tool call — and the
+    log may carry the exception type only."""
+    def broken(envelope):
+        raise ValueError("PAN ABCDE1234F")
+
+    monkeypatch.setattr(
+        agent_tools.TOOLS["get_money_transactions"], "model_view", broken
+    )
+    _mock_money()
+
+    outcome = _money_outcome()
+
+    assert outcome.is_error is False
+    assert len(json.loads(outcome.content)["txns"]) == MONEY_ROWS
+    assert "ABCDE1234F" not in caplog.text
+    assert "ValueError" in caplog.text
+
+
+def test_kb_schema_exposes_the_response_format_enum():
+    by_name = {s["name"]: s for s in agent_tools.tool_schemas()}
+    props = by_name["search_knowledge_base"]["input_schema"]["properties"]
+    assert props["response_format"]["enum"] == ["concise", "detailed"]
+    assert "detailed" in props["response_format"]["description"]
+    # the CHO-267 recall default is unchanged
+    assert "default 10" in props["top_k"]["description"]
+    assert "response_format" not in (
+        by_name["search_knowledge_base"]["input_schema"]["required"]
+    )
+
+
+def test_money_description_tells_the_model_the_aggregates_are_complete():
+    by_name = {s["name"]: s for s in agent_tools.tool_schemas()}
+    desc = by_name["get_money_transactions"]["description"]
+    assert "capped" in desc
+    assert "exact" in desc
+    assert "card" in desc

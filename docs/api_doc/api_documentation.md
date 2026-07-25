@@ -372,18 +372,32 @@ Empty portfolio = `Status: Success` with empty `lDictHoldingData` dict.
 
 | Item | Value |
 |------|-------|
-| Call | `POST /api/kb/search` · body `{"query": 1–1000 chars, "top_k": 1–20 (default 5)}` |
+| Call | `POST /api/kb/search` · body `{"query": 1–1000 chars, "top_k": 1–20 (default 10), "response_format": "concise" \| "detailed" (default "concise")}` |
 | Retrieval | Postgres FTS (`websearch_to_tsquery`, GIN) + pgvector cosine (`text-embedding-3-large`, 3072-d, seq scan) fused with RRF (k=60) |
 | Degrade | embedding failure → FTS-only results + `"degraded":"fts_only"` (never an error) |
 | Empty | `{"kind":"ok","results":[]}` — a valid answer |
 | Unconfigured | 503 `KB_UNAVAILABLE` (no `DATABASE_URL`) |
+| Invalid | 422 with field errors — including an unrecognized `response_format` |
 
 ### Response fields
+
+`response_format` governs **only how much of each result is serialized**. Retrieval, fusion, ranking and the number of results are identical in both formats — the ids and their order never differ (CHO-277).
+
+**`detailed`** — every result carries the full field set:
 
 | Field | Notes |
 |-------|-------|
 | `results[].id/topic/section/question/answer` | the KB chunk (generic support content, no client PII) |
 | `results[].tat` | turnaround time when present, else null |
 | `results[].score` | RRF fused score (rank agreement across legs — not a probability) |
+
+**`concise`** (default) — the same results in the same order, bounded for the agent's context:
+
+| Field | Notes |
+|-------|-------|
+| `results[].id/topic/section/question` | on every result |
+| `results[].answer` / `results[].tat` | top 3 results only; answers over 1,200 chars are cut at that bound |
+| `results[].truncated` | `true` only on a retained answer that hit the 1,200-char bound |
+| `results[].score` | omitted |
 
 **Privacy:** user queries may carry personal details — logs record length/count/timing only, never query text. `DATABASE_URL`/`OPENAI_API_KEY` live in untracked `.env` only.
