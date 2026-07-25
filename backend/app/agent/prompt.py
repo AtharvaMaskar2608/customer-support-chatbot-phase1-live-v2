@@ -23,7 +23,7 @@ Prompt-caching discipline (CHO-226 · design D8, relocated by CHO-264 · D1):
     history, so a per-minute re-render invalidated the history entry on the
     very next turn — measured, a history breakpoint under that layout saved
     only 11%, versus 66% once the tail moved past the history. The tail's
-    ~94 tokens are fresh input either way, so the move is cost-neutral on
+    ~60 tokens are fresh input either way, so the move is cost-neutral on
     its own and unconditional (no flag).
 
 Measured with `count_tokens` on `claude-haiku-4-5` (CHO-226 · task 5.4),
@@ -45,9 +45,16 @@ The figures above are the CHO-226 baseline. Later prompt/tool additions grew
 the cached prefix; re-measured for CHO-264 with `count_tokens` against
 `claude-sonnet-4-6`:
 
-    tools (12 schemas)                2,926 tokens
+    tools (12 schemas)                3,080 tokens
     system                              268 tokens
-    tools + system + primed block     6,559 tokens   ← the cacheable prefix
+    tools + system + primed block     6,731 tokens   ← the cacheable prefix
+
+CHO-264's own proposal and design quote **6,559** with tools at 2,926. Those
+were correct when measured, then CHO-277 landed in the same batch and grew the
+`tools` block by ~154 tokens (a `response_format` field on the KB schema plus a
+longer money description). The figures here are the post-CHO-277 re-measurement
+and are the ones to compare a prod `cache_read` against; treat the 6,559 in the
+CHO-264 artifacts as that change's authoring-time baseline, not as a live gate.
 
 The primed turn is part of the PROMPT, not of the conversation: it is
 prepended to `thread.messages()` at call time and never stored as turns

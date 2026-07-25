@@ -47,7 +47,7 @@
 
 - [ ] 5.1 If the rule fires: add `"ttl": "1h"` to the **rolling tip marker only** (`store.with_history_breakpoint`), leaving `system`, the primed block, and the insurance marker at 5 minutes.
 - [ ] 5.2 Land 5.1 in the same commit as sections 1–2, so no build ever prices a 1h write at the 5m rate.
-- [ ] 5.3 Canary after deploy: `cache_read` on the first span of a fresh thread is still ≈6,559 (the 5m frozen entries still read alongside a 1h tip), and `ephemeral_1h_input_tokens` is non-zero on tip writes while `ephemeral_5m_input_tokens` carries the prefix writes.
+- [ ] 5.3 Canary after deploy: `cache_read` on the first span of a fresh thread is still ≈6,731 (the 5m frozen entries still read alongside a 1h tip), and `ephemeral_1h_input_tokens` is non-zero on tip writes while `ephemeral_5m_input_tokens` carries the prefix writes. (Prefix re-measured post-CHO-277: 6,559 → 6,731.)
 - [ ] 5.4 If the rule does not fire: record the measured numbers, keep 5 minutes everywhere, and still ship sections 1–3 (the accounting fix stands on its own).
 
 ## 6. Ship & sync

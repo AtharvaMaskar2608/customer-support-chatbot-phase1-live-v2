@@ -63,8 +63,8 @@
 ## 7. Deploy and prod canary
 
 - [ ] 7.1 Backend-only image: build + bump `backendvX.Y.Z` in `docker-compose.yml`; frontend tag untouched (per `docs/deployment.md`).
-- [ ] 7.2 Canary (user-gated — needs a fresh SSO JWT): two chat turns ~10 s apart on prod, then read the two `llm` spans and assert turn-2 `cache_read ≈ 6,559 + H₁`.
-- [ ] 7.3 Prod gates on threads with ≥5 user turns: median `cache_read/total_prompt` on 2nd+ `llm` spans ≥ 0.70; median per-turn `cost_inr` at turn ≥8 down ≥50%; `cache_creation ≤ 1.3×` the round's own delta on ≥90% of spans; **zero** spans with `cache_creation > 10,000` while `total_prompt > 15,000`; `cache_read ≥ 6,000` on the first span of every fresh thread. Do not measure across a flag flip.
+- [ ] 7.2 Canary (user-gated — needs a fresh SSO JWT): two chat turns ~10 s apart on prod, then read the two `llm` spans and assert turn-2 `cache_read ≈ 6,731 + H₁`. (**Re-measured after CHO-277 shipped in the same batch and grew the `tools` block by ~154 tok: prefix 6,559 → 6,731, tools 2,926 → 3,080, system 268 unchanged.** Use 6,731 for this gate; 6,559 was this change's authoring-time baseline.)
+- [ ] 7.3 Prod gates on threads with ≥5 user turns: median `cache_read/total_prompt` on 2nd+ `llm` spans ≥ 0.70; median per-turn `cost_inr` at turn ≥8 down ≥50%; `cache_creation ≤ 1.3×` the round's own delta on ≥90% of spans; **zero** spans with `cache_creation > 10,000` while `total_prompt > 15,000`; `cache_read ≥ 6,000` on the first span of every fresh thread (the measured prefix is 6,731; the 6,000 floor leaves headroom and still holds). Do not measure across a flag flip.
 - [ ] 7.4 Rollback path rehearsed and documented: `AGENT_HISTORY_CACHE=0` + `docker rm -f jini-backend` / `docker run … -e …` (user-gated SSH); Phase 0 stays live and independently verifiable.
 
 ## 8. Ship & sync
