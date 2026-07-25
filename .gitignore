@@ -33,3 +33,7 @@ jini-*.tar.gz
 
 # Agent worktrees (transient, created by Claude Code isolation)
 .claude/worktrees/
+
+# routing-eval sweep reports (CHO-276) — per-run artifacts, attached to Linear
+# rather than committed
+backend/evals/reports/
