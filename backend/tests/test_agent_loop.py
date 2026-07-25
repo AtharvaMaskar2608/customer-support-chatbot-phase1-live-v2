@@ -1101,3 +1101,79 @@ def test_feedback_on_empty_thread_is_ok_and_stores_nothing(app):
         assert resp.status_code == 200
         assert resp.json() == {"ok": True}
         assert _feedback_jobs(app) == []
+
+
+# --- E5 · the ticket-affirmation guard (CHO-276) -------------------------------
+#
+# This is eval case E5, and it lives HERE rather than in backend/evals/ on
+# purpose: `raise_support_ticket` has no dry-run mode (config exposes only
+# FRESHDESK_API_ROOT / FRESHDESK_API_KEY), and the case's whole point is the
+# branch where the guard must REJECT. A live eval that regressed would file real
+# Freshdesk tickets — the eval would cause the incident it exists to catch.
+# respx makes "zero POSTs to /tickets" a first-class assertion, which is the
+# stronger statement anyway.
+#
+# Parametrized over both context-curation flag states. AGENT_CONTEXT_CURATION is
+# introduced by CHO-271; until then setting it is inert and the two runs are
+# identical — which is exactly the "behaviour is identical in each" claim, and it
+# starts biting the moment the flag means something.
+
+
+@pytest.mark.parametrize("curation", ["0", "1"])
+def test_unaffirmed_model_ticket_is_rejected_with_zero_freshdesk_requests(
+    app, monkeypatch, curation
+):
+    """The model decides to escalate on its own: the user's latest message
+    neither asks for a human nor accepts an offer (there was no offer). The
+    dispatcher must bounce the call as an is_error result carrying the
+    offer-instead instruction, the ticket artifact must never be emitted, and
+    Freshdesk must see NOTHING."""
+    monkeypatch.setenv("AGENT_CONTEXT_CURATION", curation)
+    _fd_env(monkeypatch)
+    fake = FakeAnthropic([
+        _tool_msg(_tool_use("raise_support_ticket", {"reason": "funds not visible"})),
+        _text_msg("Want me to raise a ticket so the team can take this up?"),
+    ])
+    # assert_all_called=False: the whole point is that this route is never hit.
+    with respx.mock(assert_all_called=False) as router:
+        tickets = router.post(f"{FD_ROOT}/tickets").mock(
+            return_value=httpx.Response(201, json={"id": 7559999})
+        )
+        with TestClient(app) as client:
+            app.state.anthropic_client = fake
+            thread = _get_thread(app)
+            # Skip the best-effort Profile name lookup so the ONLY outbound
+            # request this turn could make is the ticket POST under assertion.
+            thread.name_fetched = True
+            # A plain factual exchange: no escalation ask, no ticket offer to
+            # affirm, so a model-emitted raise is the model deciding.
+            _append(app, thread, role="user", kind="user_text",
+                    text="my ledger balance looks lower than I expected")
+            _append(app, thread, role="assistant", kind="assistant_text",
+                    text="Debits and credits both show in the ledger report — "
+                         "the balance column is the running total after each entry.")
+            events = _parse_events(
+                _post_chat(client, "my funds from yesterday still are not showing")
+            )
+
+        # zero Freshdesk traffic, whatever else happened
+        assert tickets.call_count == 0
+        assert [c for c in router.calls if "/tickets" in str(c.request.url)] == []
+        assert len(router.calls) == 0  # in fact no outbound request at all
+
+        # the guard bounced it as an actionable is_error result
+        finished = [d for e, d in events if e == "tool" and d["status"] == "finished"]
+        assert finished == [{
+            "name": "raise_support_ticket", "status": "finished", "is_error": True,
+        }]
+        bounce = fake.calls[1]["messages"][-1]["content"][0]
+        assert bounce["type"] == "tool_result"
+        assert bounce["is_error"] is True
+        assert "Do NOT raise a ticket" in bounce["content"]
+        assert "Want me to raise a ticket" in bounce["content"]
+
+        # no ticket card, no ticket memo, and the turn still ends cleanly
+        assert not [e for e, _ in events if e == "artifact"]
+        assert events[-1][0] == "done"
+        thread = _get_thread(app)
+        assert "flow_event" not in [t.kind for t in thread.turns]
