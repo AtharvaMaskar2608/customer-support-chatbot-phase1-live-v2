@@ -139,6 +139,25 @@ def _usage_dict(usage: Any) -> dict:
         value = getattr(usage, key, None)
         if value is not None:
             out[key] = value
+    # CHO-278: the per-TTL cache-write split lives one level down, on
+    # `usage.cache_creation` (anthropic.types.CacheCreation). The flat key above
+    # is its inclusive sum and carries no TTL, but a 1-hour write bills at 2x
+    # base input against 1.25x for 5 minutes — so the cost estimator needs the
+    # split. Absent on older SDK payloads and on test doubles; then the flat
+    # total alone is stored, exactly as before.
+    creation = getattr(usage, "cache_creation", None)
+    if creation is not None:
+        for out_key, attr in (
+            ("cache_creation_5m_input_tokens", "ephemeral_5m_input_tokens"),
+            ("cache_creation_1h_input_tokens", "ephemeral_1h_input_tokens"),
+        ):
+            value = (
+                creation.get(attr)
+                if isinstance(creation, dict)
+                else getattr(creation, attr, None)
+            )
+            if value is not None:
+                out[out_key] = value
     return out
 
 

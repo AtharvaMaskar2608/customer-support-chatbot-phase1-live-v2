@@ -269,6 +269,171 @@ def test_ensure_schema_creates_table_when_enabled():
         tracing._ENABLED = False
 
 
+# --- CHO-278: the per-TTL cache-write split ----------------------------------
+# Cache writes bill per TTL (5m = 1.25x base input, 1h = 2x), and the flat
+# `cache_creation_input_tokens` carries no TTL — so both the `llm` span and the
+# stored turn usage have to capture `usage.cache_creation`'s nested split.
+# (Task 3.4 lives here rather than in test_agent_loop.py; `_usage_dict` is the
+# function that builds `turns.meta.usage`, so it is exercised directly.)
+
+
+class _CacheCreation:
+    """Stands in for anthropic.types.CacheCreation."""
+
+    def __init__(self, ephemeral_5m_input_tokens, ephemeral_1h_input_tokens):
+        self.ephemeral_5m_input_tokens = ephemeral_5m_input_tokens
+        self.ephemeral_1h_input_tokens = ephemeral_1h_input_tokens
+
+
+_NO_ATTR = object()  # "the attribute is not set at all", distinct from None
+
+
+class _UsageObj:
+    """A non-dict usage object, like the real SDK's Usage model."""
+
+    def __init__(self, *, cache_creation=_NO_ATTR):
+        self.input_tokens = 120
+        self.output_tokens = 18
+        self.cache_read_input_tokens = 6_559
+        self.cache_creation_input_tokens = 5_000
+        if cache_creation is not _NO_ATTR:
+            self.cache_creation = cache_creation
+
+
+class _SplitFinalMsg:
+    model = "claude-sonnet-4-6"
+    stop_reason = "end_turn"
+    usage = _UsageObj(
+        cache_creation=_CacheCreation(
+            ephemeral_5m_input_tokens=1_200, ephemeral_1h_input_tokens=3_800
+        )
+    )
+
+
+def _drive_one_round(final):
+    async def run():
+        holder = {}
+        async for d in tracing.observe_model_round(
+            user_input="hi",
+            open_stream=lambda: _FakeStream(["ok"], final),
+            holder=holder,
+        ):
+            yield d
+
+    async def go():
+        pool = FakePool()
+        async for _ in tracing.observe_turn(
+            message="hi", session_id="s", client_code="c", pool=pool, run=run
+        ):
+            pass
+        pending = list(tracing._pending)
+        if pending:
+            await asyncio.gather(*pending)
+        return pool
+
+    return _run(go())
+
+
+def _llm_metadata(pool):
+    insert = next(c for c in pool.calls if "INSERT INTO agent_traces" in c[0])
+    spans = json.loads(insert[1][-1])
+    return next(s["metadata"] for s in spans if s["type"] == "llm")
+
+
+def test_llm_span_records_the_per_ttl_cache_split():
+    tracing._ENABLED = True
+    try:
+        meta = _llm_metadata(_drive_one_round(_SplitFinalMsg()))
+        assert meta["cache_creation_5m_input_tokens"] == 1_200
+        assert meta["cache_creation_1h_input_tokens"] == 3_800
+        # The inclusive aggregate is still recorded beside the split — the
+        # frontend SpanTree reads it, and the cost math prefers the split.
+        assert meta["cache_creation_input_tokens"] == 5_000
+        assert meta["cache_read_input_tokens"] == 6_559
+    finally:
+        tracing._ENABLED = False
+
+
+def test_llm_span_split_is_none_when_usage_has_no_cache_creation():
+    """_FinalMsg's usage has no `cache_creation` (as before this change): the
+    span behaves exactly as today and the split reads as absent, so the cost
+    estimator falls the aggregate back to the 5-minute rate."""
+    tracing._ENABLED = True
+    try:
+        meta = _llm_metadata(_drive_one_round(_FinalMsg()))
+        assert meta["cache_creation_5m_input_tokens"] is None
+        assert meta["cache_creation_1h_input_tokens"] is None
+        assert meta["cache_creation_input_tokens"] == 0
+        assert meta["cache_read_input_tokens"] == 100
+    finally:
+        tracing._ENABLED = False
+
+
+def test_cache_creation_get_tolerates_dict_none_and_missing():
+    get = tracing._cache_creation_get
+    assert get(None, "ephemeral_1h_input_tokens") is None
+    assert get({"input_tokens": 1}, "ephemeral_1h_input_tokens") is None
+    assert get({"cache_creation": None}, "ephemeral_1h_input_tokens") is None
+    # a plain dict block, not the SDK model
+    assert get(
+        {"cache_creation": {"ephemeral_1h_input_tokens": 7}},
+        "ephemeral_1h_input_tokens",
+    ) == 7
+    assert get(_UsageObj(cache_creation=None), "ephemeral_5m_input_tokens") is None
+
+
+def test_usage_dict_captures_the_split_for_turn_meta():
+    """`turns.meta.usage` (built by loop._usage_dict) carries both split values
+    alongside the four flat keys."""
+    from app.agent import loop
+
+    usage = loop._usage_dict(_SplitFinalMsg.usage)
+    assert usage == {
+        "input_tokens": 120,
+        "output_tokens": 18,
+        "cache_creation_input_tokens": 5_000,
+        "cache_read_input_tokens": 6_559,
+        "cache_creation_5m_input_tokens": 1_200,
+        "cache_creation_1h_input_tokens": 3_800,
+    }
+
+
+def test_usage_dict_without_cache_creation_is_unchanged():
+    """A usage object with no `cache_creation` yields exactly the pre-change
+    four keys — no None placeholders, nothing extra."""
+    from app.agent import loop
+
+    assert loop._usage_dict(_UsageObj()) == {
+        "input_tokens": 120,
+        "output_tokens": 18,
+        "cache_creation_input_tokens": 5_000,
+        "cache_read_input_tokens": 6_559,
+    }
+    assert loop._usage_dict(_UsageObj(cache_creation=None)) == {
+        "input_tokens": 120,
+        "output_tokens": 18,
+        "cache_creation_input_tokens": 5_000,
+        "cache_read_input_tokens": 6_559,
+    }
+    assert loop._usage_dict(None) == {}
+    # A usage blob that is already a dict passes through untouched.
+    assert loop._usage_dict({"input_tokens": 11}) == {"input_tokens": 11}
+
+
+def test_usage_dict_accepts_a_plain_dict_cache_creation_block():
+    from app.agent import loop
+
+    usage = _UsageObj(
+        cache_creation={
+            "ephemeral_5m_input_tokens": 4_000,
+            "ephemeral_1h_input_tokens": 1_000,
+        }
+    )
+    out = loop._usage_dict(usage)
+    assert out["cache_creation_5m_input_tokens"] == 4_000
+    assert out["cache_creation_1h_input_tokens"] == 1_000
+
+
 def test_ensure_schema_noop_without_pool_or_disabled():
     tracing._ENABLED = True
     _run(tracing.ensure_schema(None))  # no pool → no crash

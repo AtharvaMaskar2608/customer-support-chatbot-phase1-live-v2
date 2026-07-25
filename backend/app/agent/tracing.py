@@ -372,6 +372,17 @@ async def observe_model_round(
         "cache_creation_input_tokens": _usage_get(
             usage, "cache_creation_input_tokens"
         ),
+        # CHO-278: cache writes bill per TTL (5m = 1.25x base input, 1h = 2x),
+        # and the aggregate above carries no TTL. Record the split so the cost
+        # estimator prices each bucket instead of guessing. None when the SDK
+        # omits `usage.cache_creation` — the estimator then prices the aggregate
+        # at the 5-minute rate, as it always did.
+        "cache_creation_5m_input_tokens": _cache_creation_get(
+            usage, "ephemeral_5m_input_tokens"
+        ),
+        "cache_creation_1h_input_tokens": _cache_creation_get(
+            usage, "ephemeral_1h_input_tokens"
+        ),
         "stop_reason": getattr(final, "stop_reason", None),
     }
 
@@ -431,3 +442,18 @@ def _usage_get(usage: Any, key: str) -> Any:
     if isinstance(usage, dict):
         return usage.get(key)
     return getattr(usage, key, None)
+
+
+def _cache_creation_get(usage: Any, key: str) -> Any:
+    """One field of the nested per-TTL cache-write split (CHO-278).
+
+    ``usage.cache_creation`` is an ``anthropic.types.CacheCreation`` model, but
+    tolerate a plain dict and a missing/None block — older SDK payloads and test
+    doubles have no split at all.
+    """
+    creation = _usage_get(usage, "cache_creation")
+    if creation is None:
+        return None
+    if isinstance(creation, dict):
+        return creation.get(key)
+    return getattr(creation, key, None)
