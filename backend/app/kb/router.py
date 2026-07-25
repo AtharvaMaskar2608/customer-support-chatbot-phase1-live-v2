@@ -4,10 +4,19 @@ Stateless and session-free by design: the contract is shaped to be registered
 verbatim as an agent tool later. Privacy: user questions may carry personal
 details (PANs, names), so logs record length/count/timing only — never the
 query text.
+
+CHO-277: `response_format` governs how much of each result is serialized, and
+nothing else — retrieval, RRF fusion, ranking and the result count are
+identical in both formats. `detailed` is the pre-CHO-277 field set exactly;
+`concise` (the default) keeps every ranked result but carries full answers only
+on the top few, because `top_k=10` full Q&A answers are both the second-largest
+line in the context bill and — being mutually similar by construction — its
+worst distractors.
 """
 
 import logging
 import time
+from typing import Literal
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -33,6 +42,50 @@ router = APIRouter()
 class KbSearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=1000)
     top_k: int = Field(default=10, ge=1, le=20)
+    # Anything other than these two literals is a 422 with field errors.
+    response_format: Literal["concise", "detailed"] = "concise"
+
+
+# How many top-ranked results keep their full answer in the concise form. The
+# answer bodies carry essentially all the mass (mean 174 chars, p99 1,548, max
+# 3,010 — versus question 43, topic 8, section 23), so this is the whole lever.
+_CONCISE_FULL_ANSWERS = 3
+_CONCISE_ANSWER_LIMIT = 1200
+
+
+def _concise_result(result: dict, *, with_answer: bool) -> dict:
+    item = {
+        "id": result.get("id"),
+        "topic": result.get("topic"),
+        "section": result.get("section"),
+        "question": result.get("question"),
+    }
+    if not with_answer:
+        return item
+    answer = result.get("answer")
+    clipped = isinstance(answer, str) and len(answer) > _CONCISE_ANSWER_LIMIT
+    item["answer"] = answer[:_CONCISE_ANSWER_LIMIT] if clipped else answer
+    item["tat"] = result.get("tat")
+    if clipped:
+        # Flagged, never silently cut: the model must be able to tell a short
+        # answer from a clipped one before it quotes it as complete.
+        item["truncated"] = True
+    return item
+
+
+def _concise_results(results: list) -> list:
+    """Same results, same ids, same fused order — less of each.
+
+    `score` is dropped (the model never ranks on it) and answers are kept only
+    on the top `_CONCISE_FULL_ANSWERS`; the rest keep question + metadata, which
+    is what the model needs to decide whether to ask for `detailed`.
+    """
+    return [
+        _concise_result(r, with_answer=rank < _CONCISE_FULL_ANSWERS)
+        if isinstance(r, dict)
+        else r
+        for rank, r in enumerate(results)
+    ]
 
 
 async def run_kb_search(
@@ -45,6 +98,9 @@ async def run_kb_search(
     FTS-only retrieval and marks the envelope `degraded: "fts_only"` — exactly
     as the route always has. Returns the route's exact 200 body on success, a
     ToolError otherwise; never raises. Logs never contain the query text.
+
+    `response_format` shapes serialization only (CHO-277) and is applied last,
+    after the retrieval has been recorded for tracing.
     """
     params = parse_params(KbSearchRequest, params)
     if isinstance(params, ToolError):
@@ -85,12 +141,19 @@ async def run_kb_search(
             ),
         )
 
+    # CHO-277: projected AFTER observe_retrieval has returned, so the retriever
+    # span's `metadata.retrieval_context` keeps the full question — answer text
+    # of every fused chunk in both formats (CHO-267's trace-viewer chunk view).
+    if params.response_format == "concise":
+        results = _concise_results(results)
+
     elapsed_ms = round((time.monotonic() - started) * 1000)
     logger.info(
-        "kb search: len=%s results=%s degraded=%s ms=%s",
+        "kb search: len=%s results=%s degraded=%s format=%s ms=%s",
         len(query),
         len(results),
         embedding is None,
+        params.response_format,
         elapsed_ms,
     )
     payload: dict = {"kind": "ok", "results": results}

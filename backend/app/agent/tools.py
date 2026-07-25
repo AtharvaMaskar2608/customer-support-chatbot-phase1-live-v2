@@ -20,6 +20,13 @@ Dispatch contract (task 2.2):
                              (log carries the exception TYPE only)
   - success               -> compact sorted-key JSON of the envelope
 Duration is measured per call and returned for the tool_result meta.
+
+CHO-277 adds an optional per-tool `model_view` projection. It shapes ONLY the
+JSON that becomes the tool_result `content` (what the model reads and what the
+conversation store keeps); `DispatchOutcome.envelope` always carries the full
+unprojected envelope, so `loop.py:_artifact_payload` and the pinned SSE
+artifact contract are untouched by construction. Failures never reach it — an
+error message IS the corrective instruction to the model and stays verbatim.
 """
 
 import json
@@ -34,7 +41,7 @@ from app.agent.tickets import run_raise_ticket, ticket_call_is_user_initiated
 from app.columns import run_report_columns
 from app.data.brokerage import run_brokerage
 from app.data.holdings import run_holdings
-from app.data.money import run_money
+from app.data.money import money_model_view, run_money
 from app.kb.router import run_kb_search
 from app.report import run_pnl
 from app.reports.contract_notes import (
@@ -47,6 +54,9 @@ from app.reports.tax import run_tax
 logger = logging.getLogger("app.agent.tools")
 
 Handler = Callable[[Any, ToolCtx], Awaitable[dict | ToolError]]
+# CHO-277: envelope -> model-facing projection of that same envelope. Pure,
+# never mutating its input, and applied to successes only.
+ModelView = Callable[[dict], dict]
 
 _DATE = {"type": "string", "description": "Date in YYYY-MM-DD format."}
 _DELIVERY = {
@@ -73,6 +83,11 @@ class Tool:
     description: str
     schema: dict
     handler: Handler
+    # CHO-277: optional model-facing projection of the success envelope. None
+    # (the default) is identity — the model sees exactly what the card does.
+    # When set, it shapes the tool_result `content` ONLY; the artifact path
+    # reads `DispatchOutcome.envelope`, which is never projected.
+    model_view: ModelView | None = None
 
 
 async def _run_tax_fy(params: Any, ctx: ToolCtx) -> dict | ToolError:
@@ -295,10 +310,15 @@ _TOOL_LIST = [
             "pay-out (withdrawals) — for the current financial year, as one "
             "merged passbook. Call this when the user asks about funds "
             "added, withdrawals, transfer status, or missing money. Takes "
-            "no parameters."
+            "no parameters. The row list you receive is capped to the most "
+            "recent transactions, while `counts`, `landed` and `totalRecords` "
+            "are computed over the client's whole financial year and are "
+            "exact — answer totals, counts and status questions from those "
+            "aggregates. The user's transaction card shows every row."
         ),
         schema=_EMPTY_SCHEMA,
         handler=run_money,
+        model_view=money_model_view,
     ),
     Tool(
         name="get_brokerage_rates",
@@ -333,6 +353,18 @@ _TOOL_LIST = [
                     "minimum": 1,
                     "maximum": 20,
                     "description": "How many results to return (default 10).",
+                },
+                "response_format": {
+                    "type": "string",
+                    "enum": ["concise", "detailed"],
+                    "description": (
+                        "How much of each result to return. Default "
+                        "'concise': every result's question and topic, with "
+                        "the full text on the closest few — enough to answer "
+                        "almost every question. Ask for 'detailed' only when "
+                        "a lower-ranked entry is clearly the one the user "
+                        "means and you need its full text to answer."
+                    ),
                 },
             },
             "required": ["query"],
@@ -440,6 +472,25 @@ class DispatchOutcome:
     error_code: str | None = None
 
 
+def _model_payload(tool: Tool, result: dict) -> dict:
+    """The success envelope as the MODEL should see it (CHO-277).
+
+    Identity unless the tool declares a `model_view`. A projection bug must
+    never fail a healthy tool call, so a raising projection degrades to the
+    full envelope — more tokens, still correct. The log carries the tool name
+    and the exception TYPE only, never any payload.
+    """
+    if tool.model_view is None:
+        return result
+    try:
+        return tool.model_view(result)
+    except Exception as exc:
+        logger.warning(
+            "tool model_view failed tool=%s error=%s", tool.name, type(exc).__name__
+        )
+        return result
+
+
 async def dispatch_outcome(
     name: str, tool_input: Any, ctx: ToolCtx
 ) -> DispatchOutcome:
@@ -479,6 +530,8 @@ async def dispatch_outcome(
             content=_UNEXPECTED_FAILURE_MESSAGE, is_error=True, duration_ms=_ms()
         )
     if isinstance(result, ToolError):
+        # Failures bypass `model_view` entirely: the message is the corrective
+        # instruction the model must act on, and truncating it would break it.
         return DispatchOutcome(
             content=result.message,
             is_error=True,
@@ -486,9 +539,13 @@ async def dispatch_outcome(
             error_code=result.code,
         )
     return DispatchOutcome(
-        content=json.dumps(result, sort_keys=True, separators=(",", ":")),
+        content=json.dumps(
+            _model_payload(tool, result), sort_keys=True, separators=(",", ":")
+        ),
         is_error=False,
         duration_ms=_ms(),
+        # UNPROJECTED, always: loop.py:_artifact_payload builds the SSE data
+        # artifact from this, so the frontend card keeps the complete envelope.
         envelope=result,
     )
 
