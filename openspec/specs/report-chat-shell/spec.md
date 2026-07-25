@@ -42,11 +42,23 @@ A composer SHALL remain pinned and usable at every point, including after a flow
 - **THEN** the shell routes the same text by keyword to a matching flow, or replies with the available report and data actions if unmatched
 
 ### Requirement: Narrated generation
-While a report is being produced, the shell SHALL show a sequence of short progress captions specific to the flow (e.g. "Pulling your trades… → Tallying charges… → Packaging your report…") rather than a generic spinner. Captions SHALL NOT claim password protection.
+While a report or data-flow fetch is in progress, the shell SHALL show a sequence of short progress captions specific to the flow (e.g. "Pulling your trades… → Tallying charges… → Packaging your report…") rather than a generic spinner. Captions SHALL NOT claim password protection. The shell SHALL advance through the flow's narration steps at a steady cadence (~720ms between steps). If the fetch is still pending after the last step, the shell SHALL cycle back to the first step and continue rotating through the sequence until the fetch settles — the progress pill MUST NOT freeze on the final caption. When the fetch resolves, the narrate pill SHALL be removed and the result (or error / empty state) SHALL appear as today.
 
-#### Scenario: Narrated wait
-- **WHEN** a report is generating
-- **THEN** the progress caption advances through the flow's narration steps, then the result appears
+#### Scenario: Narrated wait completes within one cycle
+- **WHEN** a report or data flow fetch resolves during or shortly after the first pass through the narration steps
+- **THEN** the progress caption advances through the flow's narration steps, the narrate pill is removed, and the result appears
+
+#### Scenario: Long fetch cycles narration
+- **WHEN** a report or data flow fetch takes longer than one full pass through the narration steps
+- **THEN** the progress caption continues cycling through the same steps from the start until the fetch resolves, then the narrate pill is removed and the result appears
+
+#### Scenario: Holdings long fetch (screenshot case)
+- **WHEN** the holdings data fetch outlasts `Fetching your holdings…` → `Valuing at last prices…`
+- **THEN** the pill cycles back to `Fetching your holdings…` (and continues) instead of freezing on `Valuing at last prices…`
+
+#### Scenario: Contract-notes list fetch cycles
+- **WHEN** a contract-notes selection step fetches the note list and the request outlasts one narration pass
+- **THEN** the progress caption cycles through the flow's narration steps until the list returns, then the narrate pill is removed and the selection UI or result appears
 
 ### Requirement: Tinted icon system
 All widget iconography SHALL use tinted inline SVG icons (colored via `currentColor`) — not native multi-color emoji — so icons match the tile/button color context.
@@ -94,4 +106,23 @@ The shell SHALL render the connective copy beside agent artifacts itself, from f
 #### Scenario: Data card closes the exchange silently
 - **WHEN** a brokerage `data` artifact renders
 - **THEN** the card and its follow-up affordance are the entire reply — no prose recap of the card's contents appears
+
+### Requirement: Report re-run affordance appears only on a no-data result
+A re-run affordance for a guided report (P&L, ledger, capital gains) SHALL appear only when the report returns **no data**, never on a delivered report. On a successful delivery (a file downloaded or emailed) the shell SHALL show the result card and its help affordance only — no adjust / re-run pill. On a **no-data** result the shell SHALL render a "Try a different range" affordance beneath the empty-result message; choosing it SHALL append a FRESH guided flow card below, seeded (via the engine's seeded start) with the attempted run's collected slot values so every slot is pre-filled and editable and the card lands on the delivery step — the earlier messages SHALL remain unchanged as history and the shell MUST NOT mutate or re-open a card in place. Session-expiry (`AUTH_EXPIRED`) and generic errors SHALL keep their text-only remediation and SHALL NOT show a range affordance (a different range does not resolve them). The affordance SHALL appear only for reports produced by a guided flow run (which carries slot values); agent-produced file artifacts, which carry no slot values, SHALL NOT show it.
+
+#### Scenario: Delivered report shows no re-run pill
+- **WHEN** a P&L report is downloaded or emailed for a segment and range
+- **THEN** the result card and its "Tell me" help affordance are the entire reply — no "Adjust & run again" pill appears
+
+#### Scenario: No-data result offers a different range
+- **WHEN** a guided P&L report returns no data for F&O · July 2026
+- **THEN** the empty-result line is followed by a "Try a different range" affordance
+
+#### Scenario: Choosing it starts a new message
+- **WHEN** the user taps "Try a different range"
+- **THEN** a fresh P&L flow card appears below, pre-filled with F&O and July 2026 and every slot editable, and the earlier no-data message stays above unchanged
+
+#### Scenario: Session expiry keeps text-only remediation
+- **WHEN** a report fails with `AUTH_EXPIRED`
+- **THEN** the shell shows the reopen-AskFinX line only, with no range affordance
 

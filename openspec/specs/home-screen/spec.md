@@ -11,15 +11,27 @@ The chat page SHALL fill its viewport edge-to-edge with no outer backdrop, margi
 - **THEN** its content reaches the iframe edges with a single visible container (the panel itself), not a nested card
 
 ### Requirement: Home screen layout per approved mock
-The widget home screen SHALL render, top to bottom: a hero greeting, two subtitle lines ("Reports, charges, processes, ticket status." and "Files land right here — no email verification needed." with the final phrase highlighted), a section of quick-action chips rendered **without an eyebrow heading** (no "POPULAR RIGHT NOW" label), an "or ask anything about FinX" divider, a rounded chat composer with a purple send button, and the compliance footer "Factual answers only — never investment advice". There SHALL be no header bar; the "What's new" control renders as a floating top-right overlay. Chat content carries enough top spacing that the greeting does not sit under the floating control.
+The widget home screen SHALL render, top to bottom: a hero greeting, **one** subtitle line ("Get your reports in chat, explain charges and processes - no email verification needed" with the final phrase **"no email verification needed"** highlighted in online/green via `text-online` / `text-online-soft` and **bold** via `font-bold`, same font size and leading as the surrounding subtitle text), a section of quick-action chips rendered **without an eyebrow heading** (no "POPULAR RIGHT NOW" label) showing **every** non-`hideSticker` flow in a single wrap row **with no pagination, swipe, or page controls**, an **"or ask anything about FinX"** divider (hairline rules with centred label) rendered **immediately above the chat composer** (not mid-stack under the chips), a rounded chat composer with a purple send button, and the compliance footer "Factual answers only — never investment advice". There SHALL be no header bar; the "What's new" control renders as a floating top-right overlay. Chat content carries enough top spacing that the greeting does not sit under the floating control.
 
 #### Scenario: Chips render without the "Popular right now" heading
 - **WHEN** the home screen loads with a valid session
-- **THEN** the quick-action chips render directly under the subtitle lines with no "POPULAR RIGHT NOW" eyebrow label above them
+- **THEN** the quick-action chips render directly under the subtitle with no "POPULAR RIGHT NOW" eyebrow label above them
+
+#### Scenario: Divider renders just above composer on home screen
+- **WHEN** the home screen loads with a valid session
+- **THEN** the text "or ask anything about FinX" renders immediately above the chat composer, below the full chip row, with no pagination controls between chips and the divider
 
 #### Scenario: Full render with session
 - **WHEN** the page loads with a valid session context
-- **THEN** the greeting, subtitles, chips (unlabeled), divider, composer, and footer render in order, with the "What's new" control floating at the top-right and no header
+- **THEN** the greeting, subtitle, full unlabeled chip row, divider (above composer), composer, and footer render in order, with the "What's new" control floating at the top-right and no header
+
+#### Scenario: Subtitle matches CHO-269 copy
+- **WHEN** the home screen loads with a valid session
+- **THEN** the subtitle reads "Get your reports in chat, explain charges and processes - no email verification needed" and does not use the CHO-254 two-line copy
+
+#### Scenario: Highlight is green and bold
+- **WHEN** the home screen renders the subtitle
+- **THEN** only the phrase "no email verification needed" is styled with online/green tokens (`text-online` / `text-online-soft`) and `font-bold`; the rest of the subtitle stays the default muted body colour
 
 ### Requirement: Personalized hero greeting
 The hero SHALL read "Hey <FirstName> — what do you need?" using the first name from the profile-greeting capability, with the name in the accent color. The client code appears in the header only, never in the hero.
@@ -33,7 +45,7 @@ The hero SHALL read "Hey <FirstName> — what do you need?" using the first name
 - **THEN** the hero reads "Hey there — what do you need?"
 
 ### Requirement: Quick-action chips fire predefined queries
-The home-screen quick-action chips SHALL each submit their label (or trigger phrase) as a query through the chat composer; chips MUST NOT call tool APIs directly. The chip row is rendered from the flow registry, and a flow MAY opt out of the home chip row (via a `hideSticker` flag) while remaining reachable by composer keyword routing. The **Brokerage** flow SHALL NOT appear as a home chip.
+The home-screen quick-action chips SHALL each submit their label (or trigger phrase) as a query through the chat composer; chips MUST NOT call tool APIs directly. The chip row is rendered from the flow registry, and a flow MAY opt out of the home chip row (via a `hideSticker` flag) while remaining reachable by composer keyword routing. The **Brokerage** flow SHALL NOT appear as a home chip. On the **landing screen**, chips SHALL render as a **single wrap row of all** non-`hideSticker` flows with **no** page size, prev/next, swipe carousel, or dot navigation.
 
 #### Scenario: Chip tapped
 - **WHEN** the user taps a quick-action chip (e.g. "Get my P&L")
@@ -47,6 +59,10 @@ The home-screen quick-action chips SHALL each submit their label (or trigger phr
 - **WHEN** the user types "what are my brokerage charges"
 - **THEN** the brokerage flow runs and renders the rate card exactly as before
 
+#### Scenario: Landing shows all chips without pagination
+- **WHEN** the home screen renders with more than four non-`hideSticker` flows registered
+- **THEN** every non-`hideSticker` chip is visible in the wrap row at once and no prev/next or page-dot controls appear
+
 ### Requirement: Host-controlled theme
 The screen SHALL render in dark theme when the handoff includes `isDarkTheme=true` and in light theme otherwise, using Tailwind theme tokens; there is no in-widget theme toggle.
 
@@ -57,4 +73,19 @@ The screen SHALL render in dark theme when the handoff includes `isDarkTheme=tru
 #### Scenario: What's new pill contrast in dark mode
 - **WHEN** the header renders in dark theme
 - **THEN** the "What's new" pill uses a light/elevated surface (not the light mode's black) so it is clearly visible against the dark header
+
+### Requirement: Floating Main Menu control follows brand colours
+The floating top-right Main Menu control SHALL use the FinX brand colours — a light-blue fill (token `#EEF3FD`) with blue text (token `#1D4FB8`) — rather than the black/inverted pill, keeping the 🏠 emoji. The control SHALL be self-contained (its own contained/rounded surface with the reserved top spacing) so it does not overlap the conversation content. In dark mode it SHALL use an equivalent legible brand treatment, preserving the existing guarantee that the control stays clearly visible against a dark surface.
+
+#### Scenario: Main Menu uses brand colours
+- **WHEN** a conversation is active and the Main Menu control renders
+- **THEN** it shows the 🏠 emoji on a light-blue brand pill (`#EEF3FD` fill, `#1D4FB8` text), not the black pill
+
+#### Scenario: Control does not cover the chat
+- **WHEN** the conversation scrolls beneath the top-right control
+- **THEN** the control reads as a self-contained element and does not visually sit on top of message content
+
+#### Scenario: Visible in dark mode
+- **WHEN** the widget renders in dark theme
+- **THEN** the control uses a legible elevated brand treatment and stays clearly visible
 

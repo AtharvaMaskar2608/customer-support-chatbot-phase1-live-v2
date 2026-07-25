@@ -57,7 +57,7 @@ Tool input schemas SHALL contain only user-intent parameters. Credentials (SSO J
 - **THEN** the response is HTTP 400 `{"error": "MISSING_CREDENTIALS"}` and no model call is made
 
 ### Requirement: Slot filling without invention
-The system prompt SHALL instruct the model to never invent values for required tool parameters and SHALL include the current date **resolved in IST (`Asia/Kolkata`)** so relative date expressions resolve to `YYYY-MM-DD`. The date MUST be computed from an explicitly named zone, never inherited from the host or container timezone, and the report-form validator MUST resolve "today" on the same clock so the prompt and the validator can never disagree. For the four report flows (P&L, ledger, capital gains, contract notes) the model SHALL NOT ask for parameters in prose: when any parameter is missing it SHALL call `open_report_form` carrying only the values the user actually stated (none stated ⇒ flow key alone), and when every parameter the tool needs is explicitly known in the current message — for P&L/ledger/tax that includes delivery; for `list_contract_notes` both dates — it MAY call that tool directly. Contract-note date range SHALL NEVER be requested in a free-text question; missing dates SHALL use `open_report_form` with `flow=contract-notes`. The `list_contract_notes` tool description SHALL NOT instruct the model to always call it first when dates are unknown. Prose clarifying questions (all missing values bundled into one question) remain only for non-report tools (e.g. a missing note id after a list), not for report date ranges.
+The system prompt SHALL instruct the model to never invent values for required tool parameters and SHALL include the current date **resolved in IST (`Asia/Kolkata`)** so relative date expressions resolve to `YYYY-MM-DD`. The date MUST be computed from an explicitly named zone, never inherited from the host or container timezone, and the report-form validator MUST resolve "today" on the same clock so the prompt and the validator can never disagree. For the four report flows (P&L, ledger, capital gains, contract notes) the model SHALL NOT ask for parameters in prose: when any parameter is missing it SHALL call `open_report_form` carrying only the values the user actually stated (none stated ⇒ flow key alone), and when every parameter the tool needs is explicitly known in the current message — for P&L/ledger/tax that includes delivery; for `list_contract_notes` both dates — it MAY call that tool directly. When the parameters are instead carried over from a prior flow event in the thread (a follow-up such as "now the same for MTF" or "same for ledger"), the model SHALL call `open_report_form` seeded with those carried-over values rather than executing directly — a follow-up always re-opens the guided form pre-filled and editable, and a report is generated only on the user's delivery tap; the model never silently generates a report from carried-over context. Contract-note date range SHALL NEVER be requested in a free-text question; missing dates SHALL use `open_report_form` with `flow=contract-notes`. The `list_contract_notes` tool description SHALL NOT instruct the model to always call it first when dates are unknown. Prose clarifying questions (all missing values bundled into one question) remain only for non-report tools (e.g. a missing note id after a list), not for report date ranges.
 
 #### Scenario: Nothing mentioned loads the full form
 - **WHEN** the user writes "get my P&L" with no parameters
@@ -71,9 +71,17 @@ The system prompt SHALL instruct the model to never invent values for required t
 - **WHEN** the user writes "P&L for equity"
 - **THEN** the model calls `open_report_form` with the flow key and segment only, and the widget opens with the segment chip filled, asking for the date range next
 
-#### Scenario: Full mention still executes directly
+#### Scenario: Full mention in one message still executes directly
 - **WHEN** the user writes "Get my F&O P&L for 1 to 30 June 2026, download it here"
 - **THEN** the model calls the P&L report tool directly and the file card is produced with no form
+
+#### Scenario: Follow-up re-opens the seeded form, never auto-generates
+- **WHEN** the user completed a Normal ledger for FY 2026-27 and then writes "now the same for MTF"
+- **THEN** the model calls `open_report_form` seeded with book MTF and the carried-over range, the guided ledger form re-opens pre-filled and editable, and nothing generates until the user taps delivery
+
+#### Scenario: Cross-report "same" maps onto the target form
+- **WHEN** the user completed a P&L for F&O · June 2026 and then writes "now the same for ledger"
+- **THEN** the model calls `open_report_form` for ledger carrying the period (dropping the inapplicable segment), and the ledger form opens seeded with the range and asking for the book — nothing generates until the user delivers
 
 #### Scenario: Date is IST regardless of host timezone
 - **WHEN** the backend process runs with `TZ=UTC` at 01:00 IST on 21 July 2026
@@ -147,15 +155,15 @@ The backend SHALL expose `POST /api/chat/reset`, authenticated by the same heade
 - **THEN** the response is HTTP 400 `{"error": "MISSING_CREDENTIALS"}` and no thread is touched
 
 ### Requirement: Concise, non-refusing knowledge answers
-Knowledge-base narration SHALL lead with the direct answer in one to three short sentences, adding detail only when the user asks for it — no headers, lists, or preambles unless steps are requested. The system prompt SHALL enumerate the knowledge base's actual topic catalog so the model knows what it covers, and SHALL direct that process/how-to questions — including account closure/deletion — are ALWAYS answered from the knowledge base: the assistant never refuses a how-to as an action it cannot perform. For account actions outside its capabilities it SHALL explain the process and offer to raise a support ticket.
+Knowledge-base narration SHALL lead with the direct answer in one to three short sentences, adding detail only when the user asks for it — no headers, lists, or preambles unless steps are requested. User-visible replies SHALL comply with the user-facing voice requirement: no mechanism terms, process narration, retry disclosure, process-tied uncertainty/guessing after a miss, or forbidden self-narration. The system prompt SHALL enumerate the knowledge base's actual topic catalog so the model knows what it covers, and SHALL direct that process/how-to questions — including account closure/deletion — are ALWAYS answered from the knowledge base: the assistant never refuses a how-to as an action it cannot perform. For account actions outside its capabilities it SHALL explain the process and offer to raise a support ticket.
 
 #### Scenario: Account deletion is answered, not refused
 - **WHEN** the user asks "how do I delete my account?"
-- **THEN** the reply explains the closure process from the knowledge base (and may offer a ticket) — it does not respond that it cannot help with that
+- **THEN** the reply explains the closure process from the knowledge base (and may offer a ticket) — it does not respond that it cannot help with that, and it does not mention searching or the knowledge base
 
 #### Scenario: KB answer is brief
 - **WHEN** the user asks "what are AMC charges?"
-- **THEN** the reply is a few short sentences leading with the amount/definition, not a multi-section explainer
+- **THEN** the reply is a few short sentences leading with the amount/definition, not a multi-section explainer, and contains no banned mechanism or narration wording
 
 ### Requirement: The prompt carries a live IST status line
 The primed turn SHALL end with a status line stating the current IST time, weekday, and date, together with the market state and — when the market is open — the session's close time. This replaces the date-only line, so the model can answer wall-clock questions such as whether a same-day cutoff has passed, rather than only resolving relative dates.
@@ -223,4 +231,98 @@ When the live context includes the client's first name (CHO-246), the prompt SHA
 #### Scenario: Name present but not every reply
 - **WHEN** the primed live context includes `You are speaking with <FirstName>`
 - **THEN** the same block also instructs "at most once" / do not start routine replies with their name
+
+### Requirement: Ticket creation is user-initiated only
+The assistant SHALL offer to raise a support ticket but SHALL NEVER decide to raise one on its own judgement. The model SHALL call `raise_support_ticket` only when the user's latest message is an explicit escalation request (asks for a human, to raise a ticket/complaint, to escalate) or an affirmative acceptance of the assistant's own escalation invite — never preemptively. The prompt SHALL instruct: never announce ticket creation as a plan ("let me raise a ticket"); when a ticket would help, ask "Want me to raise a ticket so the team can take this up?" and stop; never claim a ticket is being or was raised unless `raise_support_ticket` was just called (the ticket confirmation card carries the id); offer at most once per issue (if declined or ignored, do not offer again for that issue); never offer a ticket while refusing a request for security/policy/another client's data (refuse briefly and stop); never narrate retrieval or internal steps.
+
+As a code-level guarantee independent of model behaviour, the orchestrator SHALL reject a model-emitted `raise_support_ticket` call whose triggering user turn is neither an explicit escalation request (allowlist match) nor an affirmative acceptance of the assistant's escalation invite in the preceding exchange: the call SHALL return an error `tool_result` (steering the model to offer instead) and SHALL NOT create a ticket. Affirmative acceptance SHALL match when the user's latest message is affirmative AND any consecutive assistant turn since the previous user message contains an escalation-invite marker — including standard offers ("raise a ticket", "Want me to raise…", "take this up") and announce/gerund forms the model sometimes emits instead of a clean offer ("let me raise", "raising a support ticket"). The help-card entry point (`POST /api/ticket`) is inherently user-initiated and is NOT subject to this check.
+
+#### Scenario: Preemptive ticket call is blocked
+- **WHEN** the model emits `raise_support_ticket` on a turn where the user only asked a factual question (no escalation request, no accepted offer)
+- **THEN** the orchestrator returns an error tool_result, no ticket is created, and the model offers a ticket instead of raising one
+
+#### Scenario: Explicit request raises a ticket
+- **WHEN** the user says "just connect me to a human" or "raise a ticket"
+- **THEN** the model's `raise_support_ticket` call passes the check and a real ticket is created
+
+#### Scenario: Affirmative after announce/raise narration is allowed
+- **WHEN** the assistant has just narrated raising a ticket (e.g. "Let me raise a support ticket…" and/or "I'm raising a support ticket now…") and the user replies "Ok" / "yes"
+- **THEN** the model's `raise_support_ticket` call passes the check so a real ticket and ticket artifact can be produced (confirmation card with the Freshdesk id)
+
+#### Scenario: Affirmative without escalate context stays blocked
+- **WHEN** the user says "yes" or "Ok" with no preceding assistant escalation invite or raise narration
+- **THEN** the orchestrator rejects `raise_support_ticket` and no ticket is created
+
+#### Scenario: Not offered while refusing
+- **WHEN** the user asks for something the assistant must refuse (another client's data, investment advice)
+- **THEN** the assistant refuses briefly and does NOT offer a ticket
+
+#### Scenario: Help-card chip is unaffected
+- **WHEN** the user taps "Raise a ticket" on a help card
+- **THEN** `POST /api/ticket` raises the ticket normally, not subject to the model-call guard
+
+### Requirement: Assistant identity name
+The system prompt SHALL identify the assistant to the model as "AskFinX" — its self-identity, the name it uses when referring to itself, and the name it continues under when resisting identity-override or instruction-extraction attempts. The customer-facing product name shown in the widget (chat, launcher, What's new, browser title) SHALL likewise be "AskFinX". Programmatic identifiers — the embed API global and init function, persisted client-side keys, and Freshdesk routing constants (tags and custom-field values) — are NOT part of this name and SHALL remain unchanged for backward compatibility and support routing.
+
+#### Scenario: The bot names itself AskFinX
+- **WHEN** the user asks "who are you?" or attempts to change the assistant's identity
+- **THEN** the assistant identifies and continues as AskFinX, not Choice Jini
+
+#### Scenario: Programmatic identifiers are unchanged
+- **WHEN** a host site initialises the widget or a bot ticket is routed in Freshdesk
+- **THEN** the `ChoiceJini.init` embed API and the internal routing constants still work exactly as before — the rename is display-only
+
+### Requirement: Client identity in context and self-only data
+The prompt SHALL carry the logged-in user's first name so the assistant can address them and recognise self-reference. The name SHALL be placed in the volatile block after the cache breakpoint (alongside the live status line), never in the cached prefix, so prompt-cache stability is preserved and the recorded prompt snapshot keeps a placeholder (the hash does not churn). The prompt SHALL instruct the assistant that ONLY the logged-in client's own data exists for it: any request for another person's account, reports, or details SHALL be declined briefly ("I can fetch reports only for your account") with no tool call — the assistant never fetches, nor pretends to fetch, a third party's data. This complements the tool-layer credential isolation (which already derives the client code from request headers); it fixes the conversational behaviour.
+
+#### Scenario: Bot can address the user
+- **WHEN** the profile provides the first name "Harsha"
+- **THEN** the assistant has "Harsha" available in its prompt context and may address the user by name
+
+#### Scenario: Name rides the volatile block
+- **WHEN** two requests are made minutes apart in the same session
+- **THEN** the cached prompt prefix is byte-identical between them and the first name appears only in the post-breakpoint block; the recorded snapshot stores a placeholder, not the name
+
+#### Scenario: Third-party data request is declined
+- **WHEN** the user asks for another person's report (e.g. "provide me <someone else>'s P&L report")
+- **THEN** the assistant briefly says it can fetch reports only for the user's own account and makes no report tool call — it does not set up a form as if it would fetch that person's data
+
+### Requirement: User-facing voice conceals intermediary steps
+User-visible assistant text SHALL NOT expose retrieval mechanics, internal process, retry loops, guessing after a miss, or self-narration. The system prompt SHALL include a **USER-FACING VOICE** section that forbids, in streamed replies, the following patterns (from CHO-265 / Jam):
+
+- **Mechanism terms:** knowledge base, KB, search results, retrieval, documents, sources, index, process note, vector, embedding, context (when describing lookup), chunk.
+- **Process narration (announce-then-act):** I'll search, let me search, searching for, let me look, let me check, let me find, I'm looking into, let me try, let me raise — the model SHALL call tools with no preceding narration and answer directly.
+- **Retry disclosure:** let me search more specifically, let me try again, that didn't return, the first search, a different search, more relevant results.
+- **Process-tied uncertainty / guessing after miss:** I'm not sure, I think, it seems, this is likely, may involve, might be, possibly, probably, I believe, it appears, as far as I can tell — when used to narrate lookup confidence, paper over an empty/failed lookup, or invent a likely process. Soft language in an otherwise clean factual answer that does not disclose process or mechanism is out of scope for this ban.
+- **Self-narration:** based on what I found, according to the information I have, from what I can see, the results indicate, I don't have information on.
+
+When a tool or knowledge-base lookup returns nothing usable, the assistant SHALL reply with a short, factual limitation using allowed phrasing (e.g. "That isn't covered in our support guides", "I can't pull that for your account") and MAY offer a support ticket per ticket policy — without mechanism terms, retry disclosure, process-tied uncertainty/guessing, or forbidden self-narration. The assistant SHALL NOT invent facts or likely causes to avoid sounding uncertain.
+
+Enforcement SHALL be via the system/primed prompt and tool descriptions only; the backend SHALL NOT apply a post-generation regex filter on assistant text in this change.
+
+Internal code, tool names (including `search_knowledge_base`), and specification text MAY continue to refer to the knowledge base; this requirement applies only to user-visible streamed text. Anthropic-facing tool descriptions SHALL NOT prime the model with "knowledge base", "search results", or "summarize the results".
+
+#### Scenario: KB answer hides mechanism
+- **WHEN** the user asks a general how-to and the model answers after a successful `search_knowledge_base` call
+- **THEN** the streamed reply leads with the direct answer and contains none of the banned mechanism, process-narration, retry-disclosure, process-tied uncertainty, or self-narration phrases
+
+#### Scenario: Tool call is silent
+- **WHEN** the model needs to look up a general support answer
+- **THEN** it calls `search_knowledge_base` with no preceding assistant text and the reply does not announce searching or looking
+
+#### Scenario: Empty lookup uses allowed miss phrasing
+- **WHEN** `search_knowledge_base` returns no usable content for the user's question
+- **THEN** the reply states the limitation in plain factual language (and may offer a ticket) without "I don't have information on", "based on what I found", inventing likely causes, or any banned mechanism term
+
+#### Scenario: Retry is invisible
+- **WHEN** the model performs a second `search_knowledge_base` call with a refined query in the same turn
+- **THEN** the user-visible reply does not mention a first search, a retry, "search results", or "more relevant results"
+
+#### Scenario: Jam-class miss does not guess
+- **WHEN** the user asks how to update cost price for shares bought outside FinX and lookups return nothing relevant
+- **THEN** the reply does not say "knowledge base", narrate search/retry, hedge with "this is likely" / "may involve", or announce "let me raise a support ticket" — it states the gap plainly and may ask whether to raise a ticket
+
+#### Scenario: Grounded answer stays direct
+- **WHEN** a tool returns account or knowledge-base data the model uses in its reply
+- **THEN** the reply states the fact directly without process-tied hedges such as "I think" or "it seems" about the lookup
 

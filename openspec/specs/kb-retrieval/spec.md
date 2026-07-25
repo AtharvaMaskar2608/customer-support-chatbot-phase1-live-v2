@@ -28,6 +28,10 @@ The query SHALL be embedded with the same model family the corpus was embedded w
 - **WHEN** the agent posts `{"query":"what are the DP charges","top_k":10}`
 - **THEN** it receives up to 10 ranked results each carrying the full answer text and metadata
 
+#### Scenario: Default top_k is ten
+- **WHEN** the agent posts `{"query":"what are the DP charges"}` with no `top_k`
+- **THEN** the search returns at most 10 results
+
 #### Scenario: Empty result
 - **WHEN** no chunk clears retrieval
 - **THEN** `{"kind":"ok","results":[]}` is returned (an empty answer is an answer — never an error)

@@ -1,5 +1,8 @@
 # session-bootstrap
 
+## Purpose
+How a chat session comes into existence: the FinX host's handoff query parameters are read exactly once at boot into an in-memory session context, then stripped from the URL, and every backend call carries those credentials as headers. Defines the no-session degraded state.
+
 ## Requirements
 
 ### Requirement: Ingest FinX handoff parameters

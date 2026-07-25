@@ -1,5 +1,8 @@
 # profile-greeting
 
+## Purpose
+The personalized greeting: a backend proxy over the upstream Get Profile API that returns only the derived first name to the client, and the frontend hook that renders it in the hero. Degrades to a nameless greeting whenever the profile is unavailable — no PAN, DOB, bank, or contact field ever reaches the client.
+
 ## Requirements
 
 ### Requirement: Backend proxies Get Profile

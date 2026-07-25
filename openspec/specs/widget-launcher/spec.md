@@ -1,5 +1,8 @@
 # widget-launcher
 
+## Purpose
+The corner embed: a standalone, framework-free `widget.js` the FinX website includes with one script tag, which renders the floating launcher bubble and hosts the chat page in an iframe. Covers the host-facing init API and the panel's open/close behaviour. The embed API global and init function are back-compat identifiers and never rename.
+
 ## Requirements
 
 ### Requirement: Embeddable launcher script
