@@ -337,10 +337,18 @@ async def observe_turn(
 
 
 async def observe_model_round(
-    *, user_input: str, open_stream: Callable[[], Any], holder: dict,
+    *,
+    user_input: str,
+    open_stream: Callable[[], Any],
+    holder: dict,
+    extra: dict | None = None,
 ) -> AsyncIterator[str]:
     """llm span for one streamed model round; yields text deltas and stashes the
-    final message in ``holder['final']`` for the loop to continue."""
+    final message in ``holder['final']`` for the loop to continue.
+
+    `extra` (CHO-271) is merged into the span metadata — COUNTS ONLY (curated
+    turns, estimated history tokens). Never message text, tool inputs or
+    envelopes: the span already records only redact(user_input) + usage."""
     trace = _current_trace.get()
     if trace is None:
         async with open_stream() as stream:
@@ -374,6 +382,8 @@ async def observe_model_round(
         ),
         "stop_reason": getattr(final, "stop_reason", None),
     }
+    if extra:
+        span.metadata.update(extra)
 
 
 async def observe_tool(

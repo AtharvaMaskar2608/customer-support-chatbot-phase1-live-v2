@@ -37,6 +37,7 @@ from typing import Any, AsyncIterator
 
 from app import config, greeting
 from app.agent import caps as agent_caps
+from app.agent import curation as agent_curation
 from app.agent import prompt as agent_prompt
 from app.agent import tickets as agent_tickets
 from app.agent import tools as agent_tools
@@ -295,12 +296,20 @@ async def _chat_events(
 
     while True:
         force_wrapup = rounds >= config.agent_max_tool_rounds()
+        # CHO-271: the ONE curation seam. Read-time projection only — the store
+        # is never mutated, so flag off ⇒ byte-identical to thread.messages().
+        curating = config.agent_context_curation()
+        history = (
+            agent_curation.messages_for_model(thread)
+            if curating
+            else thread.messages()
+        )
         messages = (
             agent_prompt.primed_messages(
                 first_name=thread.first_name,
                 instructions_override=primed_override,
             )
-            + thread.messages()
+            + history
         )
         if escalation_reminder is not None:
             messages.append(_reminder_message(escalation_reminder))
@@ -331,6 +340,18 @@ async def _chat_events(
                 user_input=message,
                 open_stream=lambda: client.messages.stream(**kwargs),
                 holder=holder,
+                # CHO-271: counts only, so the flag's effect is visible in the
+                # trace viewer without a special run. Never any message text.
+                extra={
+                    "curated_turns": (
+                        agent_curation.curated_turn_count(thread)
+                        if curating
+                        else 0
+                    ),
+                    "history_tokens_est": agent_curation.history_tokens_est(
+                        history
+                    ),
+                },
             ):
                 yield _sse("text", {"delta": delta})
             final = holder["final"]
