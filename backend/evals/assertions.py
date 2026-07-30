@@ -240,6 +240,34 @@ def preamble_before_tool(text: str | None) -> str | None:
     return f"{len(stripped)}-chars" if stripped else None
 
 
+# A GFM table opener: a pipe-bearing line whose NEXT line is a delimiter row
+# (`|---|---|`, alignment colons allowed). The two-line signature is what a GFM
+# parser itself requires, so prose that merely contains a pipe cannot match.
+_TABLE_SIGNATURE = re.compile(
+    r"^.*\|.*\n[ \t]*\|?[ \t]*:?-+:?[ \t]*(\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$",
+    re.MULTILINE,
+)
+
+
+def pipe_table(text: str | None) -> str | None:
+    """The 1-based line number of a markdown pipe table in the reply, as
+    "line-7", or None when the reply is table-free (CHO-282).
+
+    The chat renders in a ~310–420px column in every context, so a pipe table
+    reaches the user either as literal `|`/`-` text or, since CHO-282, as a
+    cramped scrollable fallback table. Neither is the intended shape: the prompt
+    asks for records (bold headline + plain field lines), which stack instead of
+    laying out as columns and so survive the narrow width at any field count.
+
+    Reports the position, never the row contents — same PII discipline as the
+    rest of this module.
+    """
+    match = _TABLE_SIGNATURE.search(text or "")
+    if match is None:
+        return None
+    return f"line-{(text or '')[: match.start()].count(chr(10)) + 1}"
+
+
 # --- exact-recall matchers (E4) ----------------------------------------------
 
 _MONTHS = (

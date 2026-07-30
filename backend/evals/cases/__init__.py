@@ -25,6 +25,7 @@ ALL_CASES = (
     e3_note_id_fidelity.CASE_RECOVERY,
     e4_fact_recall.CASE,
     e6_report_columns.CASE,
+    e6_report_columns.CASE_MULTI,
     e7_kb_followup.CASE,
     e8_silent_tool_call.CASE,
     e8_silent_tool_call.CASE_COLUMNS,
