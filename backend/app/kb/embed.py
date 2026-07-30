@@ -28,6 +28,15 @@ async def embed_query(http: httpx.AsyncClient, text: str) -> list[float] | None:
                 _EMBEDDINGS_URL,
                 headers={"Authorization": f"Bearer {api_key}"},
                 json={"model": config.kb_embed_model(), "input": text},
+                # CHO-285: a per-request override on the SHARED client (no
+                # second AsyncClient — the IPv4 transport and pooled
+                # connections still apply). Without it both attempts inherit
+                # the FinX-tuned 10s budget and a slow OpenAI stalls a KB
+                # search ~20s before it degrades to FTS-only. Retry is
+                # immediate: a blip a retry can fix clears in well under the
+                # timeout, and a backoff would only add to the stall this
+                # exists to cut.
+                timeout=config.kb_embed_timeout_seconds(),
             )
             if resp.status_code == 200:
                 return resp.json()["data"][0]["embedding"]
