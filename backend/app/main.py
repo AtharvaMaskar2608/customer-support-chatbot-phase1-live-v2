@@ -11,7 +11,7 @@ import httpx
 from fastapi import FastAPI
 
 from app import config
-from app.agent import tracing
+from app.agent import langfuse_mirror, tracing
 from app.agent.router import router as chat_router
 from app.agent.store import ThreadStore
 from app.data.brokerage import router as brokerage_router
@@ -70,6 +70,11 @@ async def lifespan(app: FastAPI):
         finally:
             # Drain queued conversation writes BEFORE the pool goes away.
             await app.state.conversation_store.close()
+            # CHO-286: the Langfuse mirror exports in batches, so a shutdown
+            # without a flush drops whatever is still queued. Guarded inside,
+            # and deliberately after the store drain — it must never delay or
+            # endanger the writes that ARE the system of record.
+            langfuse_mirror.shutdown()
             if app.state.pg_pool is not None:
                 await app.state.pg_pool.close()
 

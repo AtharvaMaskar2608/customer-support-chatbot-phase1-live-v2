@@ -38,6 +38,7 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Awaitable, Callable
 
 from app import config
+from app.agent import langfuse_mirror
 
 logger = logging.getLogger("app.agent.tracing")
 
@@ -128,6 +129,9 @@ class _Span:
     input: Any = None
     output: Any = None
     metadata: dict = field(default_factory=dict)
+    # The mirror's handle for this span (CHO-286). Runtime-only: `_span_dict`
+    # builds the persisted shape field by field, so this never reaches Postgres.
+    lf: Any = None
 
 
 @dataclass
@@ -148,6 +152,20 @@ class _Trace:
             name=name,
             start_ms=_now_ms(),
         )
+        # CHO-286: both sinks are opened HERE, in the one place a span comes
+        # into existence, so the mirror cannot describe a different shape than
+        # the persisted tree — parenting is read from the same `parent_id`.
+        # `llm` becomes a Langfuse `generation` so model/usage land in native
+        # fields; everything else is a plain span.
+        if parent_id is None:
+            span.lf = langfuse_mirror.start_root(name=name, input=self.input)
+        else:
+            parent = next((s for s in self.spans if s.id == parent_id), None)
+            span.lf = langfuse_mirror.start_child(
+                parent.lf if parent is not None else None,
+                name=name,
+                as_type="generation" if type_ == "llm" else "span",
+            )
         self.spans.append(span)
         return span
 
@@ -175,6 +193,39 @@ def configure() -> None:
     global _ENABLED
     _ENABLED = config.tracing_enabled()
     logger.info("agent tracing %s (postgres)", "enabled" if _ENABLED else "disabled")
+    # CHO-286: the mirror gets THIS module's `redact` as its export mask, so a
+    # single definition governs both sinks. It stays inert unless separately
+    # flagged on and fully credentialed.
+    langfuse_mirror.configure(mask=_mirror_mask)
+
+
+def _mirror_end_failed(span: _Span, exc: BaseException) -> None:
+    """Close a mirror span whose body raised.
+
+    OpenTelemetry exports a span when it ENDS, so one left open is simply
+    absent from Langfuse — while Postgres still records it (with a null
+    duration). That divergence is the one thing the mirror must never produce,
+    and tool/model failures are an ordinary path, not an exotic one. Records
+    the exception TYPE only; the message could carry upstream detail.
+    """
+    langfuse_mirror.end(
+        span.lf, level="ERROR", status_message=type(exc).__name__
+    )
+
+
+def _mirror_mask(*, data: Any, **_: Any) -> Any:
+    """Adapter for the Langfuse SDK's keyword-only mask hook (CHO-286).
+
+    Runs client-side on the exporter thread, so a credential- or PII-shaped
+    value is scrubbed before the span leaves this process — the unredacted form
+    never crosses the network, even to self-hosted infrastructure. A mask that
+    raises would drop the span, so failure falls back to a fixed marker rather
+    than letting the original value through.
+    """
+    try:
+        return redact(data)
+    except Exception:
+        return "[redaction-failed]"
 
 
 _SCHEMA = (
@@ -300,6 +351,15 @@ def bind_conversation_thread(thread_id: str | None) -> None:
     if trace is None or not thread_id:
         return
     trace.thread_id = thread_id
+    # CHO-286: the mirror's identity lands here rather than at turn start,
+    # because this is the first moment the thread id exists. It still precedes
+    # every child span (loop.py binds at :275, the first model round is :392),
+    # so the whole tree carries it.
+    root = trace.spans[0] if trace.spans else None
+    if root is not None:
+        langfuse_mirror.set_identity(
+            root.lf, user_id=trace.user_id, session_id=thread_id
+        )
 
 
 async def observe_turn(
@@ -333,6 +393,7 @@ async def observe_turn(
         root.end_ms = _now_ms()
         _current_parent.reset(p_tok)
         _current_trace.reset(t_tok)
+        langfuse_mirror.end(root.lf)
         _schedule_persist(pool, trace)
 
 
@@ -359,12 +420,16 @@ async def observe_model_round(
         return
     span = trace.open("llm", "model_round", parent_id=_current_parent.get())
     parts: list[str] = []
-    async with open_stream() as stream:
-        async for delta in stream.text_stream:
-            if delta:
-                parts.append(delta)
-                yield delta
-        final = await stream.get_final_message()
+    try:
+        async with open_stream() as stream:
+            async for delta in stream.text_stream:
+                if delta:
+                    parts.append(delta)
+                    yield delta
+            final = await stream.get_final_message()
+    except BaseException as exc:
+        _mirror_end_failed(span, exc)
+        raise
     holder["final"] = final
     span.end_ms = _now_ms()
     span.input = redact(user_input)
@@ -395,6 +460,30 @@ async def observe_model_round(
     }
     if extra:
         span.metadata.update(extra)
+    # CHO-286: model and token counts ride Langfuse's native generation fields
+    # so its own dashboards aggregate them; the full metadata (including the
+    # per-TTL cache split CHO-278 tuned) goes alongside, and OUR cost figure
+    # stays authoritative — it is what the CHO-262 viewer reports.
+    langfuse_mirror.end(
+        span.lf,
+        input=span.input,
+        output=span.output,
+        model=span.metadata.get("model"),
+        usage_details={
+            k: v
+            for k, v in (
+                ("input", span.metadata.get("input_tokens")),
+                ("output", span.metadata.get("output_tokens")),
+                ("cache_read_input_tokens",
+                 span.metadata.get("cache_read_input_tokens")),
+                ("cache_creation_input_tokens",
+                 span.metadata.get("cache_creation_input_tokens")),
+            )
+            if v is not None
+        }
+        or None,
+        metadata=span.metadata,
+    )
 
 
 async def observe_tool(
@@ -409,6 +498,9 @@ async def observe_tool(
     p_tok = _current_parent.set(span.id)
     try:
         outcome = await run()
+    except BaseException as exc:
+        _mirror_end_failed(span, exc)
+        raise
     finally:
         _current_parent.reset(p_tok)
         span.end_ms = _now_ms()
@@ -418,6 +510,7 @@ async def observe_tool(
         "error_code": getattr(outcome, "error_code", None),
         "duration_ms": getattr(outcome, "duration_ms", None),
     }
+    langfuse_mirror.end(span.lf, input=span.input, metadata=span.metadata)
     return outcome
 
 
@@ -438,7 +531,11 @@ async def observe_embedding(
     if trace is None:
         return await run()
     span = trace.open("retriever", "kb_embed", parent_id=_current_parent.get())
-    embedding = await run()
+    try:
+        embedding = await run()
+    except BaseException as exc:
+        _mirror_end_failed(span, exc)
+        raise
     span.end_ms = _now_ms()
     span.input = redact(query)
     span.output = {"dims": len(embedding) if embedding else None}
@@ -446,6 +543,9 @@ async def observe_embedding(
         "embedder": config.kb_embed_model(),
         "degraded": embedding is None,
     }
+    langfuse_mirror.end(
+        span.lf, input=span.input, output=span.output, metadata=span.metadata
+    )
     return embedding
 
 
@@ -458,7 +558,11 @@ async def observe_retrieval(
     if trace is None:
         return await run()
     span = trace.open("retriever", "kb_search", parent_id=_current_parent.get())
-    results = await run()
+    try:
+        results = await run()
+    except BaseException as exc:
+        _mirror_end_failed(span, exc)
+        raise
     span.end_ms = _now_ms()
     chunks = [
         f"{r.get('question', '')} — {r.get('answer', '')}".strip(" —")
@@ -471,6 +575,9 @@ async def observe_retrieval(
         "retrieval_context": chunks,
         "embedder": config.kb_embed_model(),
     }
+    langfuse_mirror.end(
+        span.lf, input=span.input, output=span.output, metadata=span.metadata
+    )
     return results
 
 

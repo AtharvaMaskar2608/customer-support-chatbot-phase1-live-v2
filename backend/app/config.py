@@ -373,6 +373,38 @@ def tracing_salt() -> str:
     return os.environ.get("TRACING_SALT", "jini-tracing")
 
 
+# --- Langfuse trace mirror (CHO-286) ----------------------------------------
+#
+# A SECOND, best-effort sink for the same span tree `agent_traces` records.
+# Postgres stays the system of record: the mirror never observes anything the
+# Postgres path does not, and a Langfuse outage changes nothing about the chat
+# response or the row that gets written. Default OFF — it needs a reachable
+# self-hosted instance, so it stays opt-in per environment.
+
+
+def langfuse_tracing_enabled() -> bool:
+    """Langfuse mirror on/off (LANGFUSE_TRACING env, default OFF — CHO-286)."""
+    return os.environ.get("LANGFUSE_TRACING", "0").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+
+def langfuse_public_key() -> str | None:
+    """Langfuse project public key (`pk-lf-…`). A credential: env or root .env."""
+    return _secret("LANGFUSE_PUBLIC_KEY")
+
+
+def langfuse_secret_key() -> str | None:
+    """Langfuse project secret key (`sk-lf-…`). A credential: env or root .env."""
+    return _secret("LANGFUSE_SECRET_KEY")
+
+
+def langfuse_base_url() -> str | None:
+    """Base URL of the SELF-HOSTED Langfuse instance. No default: without it the
+    mirror stays inert rather than silently reaching for a hosted service."""
+    return _secret("LANGFUSE_BASE_URL")
+
+
 # --- Trace viewer dashboard (CHO-262) ---------------------------------------
 #
 # The read-only admin dashboard over the agent_traces table is gated by a
