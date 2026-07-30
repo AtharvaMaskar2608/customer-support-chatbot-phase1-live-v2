@@ -201,6 +201,22 @@ def kb_embed_model() -> str:
     return os.environ.get("KB_EMBED_MODEL", "text-embedding-3-large")
 
 
+def kb_embed_timeout_seconds() -> float:
+    """Per-attempt timeout for the query-embedding call
+    (KB_EMBED_TIMEOUT_SECONDS).
+
+    Deliberately its own budget rather than the shared client's
+    upstream_timeout_seconds(): that 10s is tuned for FinX report calls, and
+    inheriting it gave embed_query's two attempts ~20s before degrading to
+    FTS-only — a live CHO-285 trace showed a 20.02s KB tool call around a 4ms
+    search. Embedding a <=1000-char query is a sub-second call on the healthy
+    path, so 3s per attempt clears it with a wide margin while capping the
+    degrade path at ~6s (the spec's single-digit ceiling). Env-overridable so
+    the value can be tuned from post-deploy traces without a rebuild.
+    """
+    return float(os.environ.get("KB_EMBED_TIMEOUT_SECONDS", "3"))
+
+
 # --- Freshdesk escalation (CHO-218) ------------------------------------------
 #
 # Ticket creation credentials + routing. The API key is a secret (env, or
