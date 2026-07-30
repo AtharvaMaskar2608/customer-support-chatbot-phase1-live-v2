@@ -421,6 +421,34 @@ async def observe_tool(
     return outcome
 
 
+async def observe_embedding(
+    *, query: str, run: Callable[[], Awaitable[list | None]],
+) -> list | None:
+    """retriever span for the query-embedding call — a sibling of the
+    ``kb_search`` span under the same ``tool`` parent (CHO-285).
+
+    Typed ``retriever`` rather than a new span type on purpose: the embedding
+    IS the vector leg's first half, and reusing the type keeps the persisted
+    graph to the agent/llm/tool/retriever shape the dashboard and the
+    observability-tracing spec pin. Records whether a vector came back (``None``
+    is the FTS-only degrade), never the vector itself — 3072 floats are noise in
+    a trace.
+    """
+    trace = _current_trace.get()
+    if trace is None:
+        return await run()
+    span = trace.open("retriever", "kb_embed", parent_id=_current_parent.get())
+    embedding = await run()
+    span.end_ms = _now_ms()
+    span.input = redact(query)
+    span.output = {"dims": len(embedding) if embedding else None}
+    span.metadata = {
+        "embedder": config.kb_embed_model(),
+        "degraded": embedding is None,
+    }
+    return embedding
+
+
 async def observe_retrieval(
     *, query: str, run: Callable[[], Awaitable[list]],
 ) -> list:

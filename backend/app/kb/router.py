@@ -123,7 +123,13 @@ async def run_kb_search(
         )
 
     started = time.monotonic()
-    embedding = await embed_query(ctx.http_client, query)
+    # CHO-285: the embedding call gets its own span, sibling to the `retriever`
+    # span below under the same `tool` parent. Its duration used to be readable
+    # only as the gap between the tool span and kb_search — which is how a 20s
+    # stall around a 4ms search went unnoticed until it was measured by hand.
+    embedding = await tracing.observe_embedding(
+        query=query, run=lambda: embed_query(ctx.http_client, query)
+    )
     try:
         # CHO-244: a `retriever` span carrying the fused chunks as
         # retrieval_context (RAG metrics). `pg_pool` rides in the closure; the

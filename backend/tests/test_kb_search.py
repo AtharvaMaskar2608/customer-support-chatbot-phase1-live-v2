@@ -10,6 +10,7 @@ import pytest
 import respx
 from fastapi.testclient import TestClient
 
+from app import config
 from app.kb.embed import to_pgvector
 from app.kb.search import RRF_K, hybrid_search, rrf_fuse
 from app.main import create_app
@@ -355,19 +356,18 @@ def test_unrecognized_response_format_is_422(client_no_db):
     assert "response_format" in resp.text
 
 
-def test_trace_retrieval_context_keeps_full_chunks_under_concise(monkeypatch):
-    """The projection runs AFTER `tracing.observe_retrieval` returns, so the
-    retriever span still carries the full question — answer text of every fused
-    chunk (CHO-267's trace-viewer chunk view) even though the model gets the
-    concise form."""
+def _search_under_a_tool_span(pg_pool, query="dp charges"):
+    """Run the tool core inside an active trace whose current parent is a `tool`
+    span — the way the agent loop dispatches it. Returns (trace, tool span,
+    payload)."""
     from app.agent import tracing
     from app.agent.ctx import ToolCtx
     from app.kb.router import run_kb_search
 
-    monkeypatch.setattr("app.config.openai_api_key", lambda: None)
-    rows = [_row(i, answer=f"full answer body {i}") for i in range(1, 6)]
     trace = tracing._Trace(thread_id=None, user_id=None, input="q", start_ms=0.0)
-    token = tracing._current_trace.set(trace)
+    tool_span = trace.open("tool", "search_knowledge_base", parent_id=None)
+    t_tok = tracing._current_trace.set(trace)
+    p_tok = tracing._current_parent.set(tool_span.id)
 
     async def go():
         async with httpx.AsyncClient() as http:
@@ -376,20 +376,164 @@ def test_trace_retrieval_context_keeps_full_chunks_under_concise(monkeypatch):
                 sso_jwt="",
                 client_code="",
                 http_client=http,
-                pg_pool=FakePool(rows),
+                pg_pool=pg_pool,
             )
-            return await run_kb_search({"query": "dp charges"}, ctx)
+            return await run_kb_search({"query": query}, ctx)
 
     try:
         payload = asyncio.run(go())
     finally:
-        tracing._current_trace.reset(token)
+        tracing._current_parent.reset(p_tok)
+        tracing._current_trace.reset(t_tok)
+    return trace, tool_span, payload
+
+
+def _span_named(trace, name):
+    return next(s for s in trace.spans if s.name == name)
+
+
+def test_trace_retrieval_context_keeps_full_chunks_under_concise(monkeypatch):
+    """The projection runs AFTER `tracing.observe_retrieval` returns, so the
+    retriever span still carries the full question — answer text of every fused
+    chunk (CHO-267's trace-viewer chunk view) even though the model gets the
+    concise form."""
+    monkeypatch.setattr("app.config.openai_api_key", lambda: None)
+    rows = [_row(i, answer=f"full answer body {i}") for i in range(1, 6)]
+
+    trace, _, payload = _search_under_a_tool_span(FakePool(rows))
 
     # what the model sees: answers only on the top 3
     assert sum("answer" in r for r in payload["results"]) == 3
     # what the trace kept: every chunk, whole
-    context = trace.spans[0].metadata["retrieval_context"]
+    context = _span_named(trace, "kb_search").metadata["retrieval_context"]
     assert context == [f"q{i} — full answer body {i}" for i in range(1, 6)]
+
+
+# --- CHO-285: bounded embedding latency + its own span ----------------------
+#
+# embed_query used to inherit the shared client's FinX-tuned budget, so two
+# attempts could stall a KB search ~20s before it degraded to FTS-only. It now
+# carries its own, far shorter per-request timeout, and its duration is a span
+# of its own rather than the gap between two other spans.
+
+
+@respx.mock
+def test_embed_call_overrides_the_shared_client_timeout(client_fake_db, monkeypatch):
+    """The override must reach the transport — and be shorter than the client
+    default it replaces, which is what the app would otherwise apply."""
+    monkeypatch.setattr("app.config.openai_api_key", lambda: "test-key")
+    route = respx.post("https://api.openai.com/v1/embeddings").mock(
+        return_value=httpx.Response(200, json={"data": [{"embedding": [0.1, 0.2]}]})
+    )
+    app, client = client_fake_db
+    app.state.pg_pool = FakePool([_row(1)], [_row(2)])
+
+    client.post("/api/kb/search", json={"query": "dp charges"})
+
+    budget = config.kb_embed_timeout_seconds()
+    # a float timeout binds every phase, not just read
+    assert route.calls.last.request.extensions["timeout"] == {
+        "connect": budget,
+        "read": budget,
+        "write": budget,
+        "pool": budget,
+    }
+    assert budget < config.upstream_timeout_seconds()
+
+
+def test_embedding_retry_budget_lands_in_single_digit_seconds():
+    """Two attempts stays the design; the per-attempt budget is what shrank.
+    The spec's ceiling is single-digit seconds, against the ~20s both attempts
+    cost while riding the general upstream budget."""
+    worst_case = 2 * config.kb_embed_timeout_seconds()
+    assert worst_case < 10
+    assert worst_case < 2 * config.upstream_timeout_seconds()
+
+
+def test_embedding_timeout_is_env_overridable(monkeypatch):
+    """Read at call time, so the value is tunable from post-deploy traces with
+    a container recreate rather than a rebuild."""
+    monkeypatch.setenv("KB_EMBED_TIMEOUT_SECONDS", "1.5")
+    assert config.kb_embed_timeout_seconds() == 1.5
+
+
+@respx.mock
+def test_timed_out_embedding_retries_once_then_degrades(client_fake_db, monkeypatch):
+    """A timing-out first attempt still gets its retry — and when that also
+    times out the request degrades to FTS-only, inside the bounded ceiling
+    rather than after two full-length upstream timeouts."""
+    monkeypatch.setattr("app.config.openai_api_key", lambda: "test-key")
+    route = respx.post("https://api.openai.com/v1/embeddings").mock(
+        side_effect=httpx.ReadTimeout("too slow")
+    )
+    app, client = client_fake_db
+    app.state.pg_pool = FakePool([_row(1)])
+
+    resp = client.post("/api/kb/search", json={"query": "dp charges"})
+
+    assert route.call_count == 2  # the retry is kept — only its budget shrank
+    body = resp.json()
+    assert body["degraded"] == "fts_only"
+    assert [r["id"] for r in body["results"]] == [1]
+    assert len(app.state.pg_pool.calls) == 1  # FTS leg only, no vector leg
+
+
+@respx.mock
+def test_embedding_gets_its_own_span_beside_the_retriever_span(monkeypatch):
+    """The whole point: embedding duration is readable directly off a span
+    instead of inferred from the gap between the tool span and kb_search."""
+    monkeypatch.setattr("app.config.openai_api_key", lambda: "test-key")
+    respx.post("https://api.openai.com/v1/embeddings").mock(
+        return_value=httpx.Response(
+            200, json={"data": [{"embedding": [0.1] * 3072}]}
+        )
+    )
+
+    trace, tool_span, _ = _search_under_a_tool_span(FakePool([_row(1)], [_row(2)]))
+
+    embed = _span_named(trace, "kb_embed")
+    search = _span_named(trace, "kb_search")
+    # siblings under the same tool parent — not nested inside each other
+    assert embed.parent_id == search.parent_id == tool_span.id
+    assert embed.type == "retriever"
+    assert embed.start_ms <= search.start_ms
+    # a closed span, so duration_ms serializes for the dashboard
+    assert embed.end_ms is not None and embed.end_ms >= embed.start_ms
+    assert embed.output == {"dims": 3072}  # the count, never the 3072 floats
+    assert embed.metadata["degraded"] is False
+    assert embed.metadata["embedder"] == config.kb_embed_model()
+
+
+def test_embedding_span_marks_the_degraded_fts_only_path(monkeypatch):
+    """Degrading changes which legs run, not whether the trace records them."""
+    monkeypatch.setattr("app.config.openai_api_key", lambda: None)
+
+    trace, _, payload = _search_under_a_tool_span(FakePool([_row(1)]))
+
+    embed = _span_named(trace, "kb_embed")
+    assert embed.output == {"dims": None}
+    assert embed.metadata["degraded"] is True
+    assert payload["degraded"] == "fts_only"
+    assert _span_named(trace, "kb_search")  # retriever span still recorded
+
+
+def test_embedding_span_is_a_no_op_without_an_active_trace(monkeypatch):
+    """The REST route runs outside a turn — the span wrapper must pass through
+    rather than fail, exactly as observe_retrieval does."""
+    from app.agent import tracing
+
+    monkeypatch.setattr("app.config.openai_api_key", lambda: None)
+
+    async def go():
+        async with httpx.AsyncClient() as http:
+            from app.kb.embed import embed_query
+
+            return await tracing.observe_embedding(
+                query="dp charges", run=lambda: embed_query(http, "dp charges")
+            )
+
+    assert tracing._current_trace.get() is None
+    assert asyncio.run(go()) is None
 
 
 # --- live integration (skipped without a reachable KB) ----------------------
