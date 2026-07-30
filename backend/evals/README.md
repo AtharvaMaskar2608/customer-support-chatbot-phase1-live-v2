@@ -62,6 +62,8 @@ uv run python -m evals.runner --arm off --quiet
 | E4 | an amount + date stated at turn 2 recalled exactly at turn 14 — the abstention metric | ≥2/3 |
 | E6 | report columns re-fetched before any column is described; no stale-only label quoted | ≥2/3 |
 | E7 | "tell me more about that" re-issues a KB query carrying a content word, not a bare pronoun | ≥2/3 |
+| E8 | the CHO-284 reproduction: `search_knowledge_base` is called with **zero** assistant text before it — categorically, not "no banned phrase" | ≥2/3 |
+| E8c | the same for `get_report_columns` | ≥2/3 |
 | E5 | the ticket-affirmation guard still rejects an unaffirmed `raise_support_ticket` | **pytest only** |
 
 Plus one assertion **every** case applies: the probe turn's assistant text must
