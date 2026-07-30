@@ -31,25 +31,30 @@ class FakePool:
 
 
 class _FakeOtelSpan:
-    def __init__(self):
+    def __init__(self, trace_id: int = 0xABCDEF0123456789):
         self.attributes = {}
+        self._trace_id = trace_id
 
     def set_attribute(self, key, value):
         self.attributes[key] = value
+
+    def get_span_context(self):
+        return type("Ctx", (), {"trace_id": self._trace_id})()
 
 
 class _FakeSpan:
     """Stands in for LangfuseSpan / LangfuseGeneration."""
 
-    def __init__(self, name, as_type, recorder, parent=None):
+    def __init__(self, name, as_type, recorder, parent=None, **kw):
         self.name, self.as_type, self.parent = name, as_type, parent
+        self.kw = kw
         self.updates, self.ended = [], False
         self.children = []
         self._otel_span = _FakeOtelSpan()
         self._recorder = recorder
 
     def start_observation(self, *, name, as_type="span", **kw):
-        child = _FakeSpan(name, as_type, self._recorder, parent=self)
+        child = _FakeSpan(name, as_type, self._recorder, parent=self, **kw)
         self.children.append(child)
         self._recorder.spans.append(child)
         return child
@@ -64,12 +69,16 @@ class _FakeSpan:
 class _FakeClient:
     def __init__(self):
         self.spans = []
+        self.scores = []
         self.shutdowns = 0
 
     def start_observation(self, *, name, as_type="span", **kw):
-        span = _FakeSpan(name, as_type, self)
+        span = _FakeSpan(name, as_type, self, **kw)
         self.spans.append(span)
         return span
+
+    def create_score(self, **kw):
+        self.scores.append(kw)
 
     def shutdown(self):
         self.shutdowns += 1
@@ -79,6 +88,9 @@ class _ExplodingClient:
     """Every entry point raises — the never-degrade case."""
 
     def start_observation(self, **kw):
+        raise RuntimeError("langfuse is down")
+
+    def create_score(self, **kw):
         raise RuntimeError("langfuse is down")
 
     def shutdown(self):
@@ -494,3 +506,149 @@ def test_concurrent_turns_do_not_cross_wire_identity(mirror):
     # Each root owns exactly its own model_round — no braiding.
     for r in roots:
         assert [c.name for c in r.children] == ["model_round"]
+
+
+# --- CHO-286 context fields (platform / version / ticket / feedback) ---------
+
+
+def test_root_carries_context_fields_and_latency(mirror, monkeypatch):
+    monkeypatch.setenv("BOT_VERSION", "backendv1.0.11")
+    pool = FakePool()
+
+    async def run():
+        tracing.bind_conversation_thread(THREAD)
+        tracing.bind_turn_seq(7)
+        tracing.bind_ticket_id(7551234)
+        yield "ok"
+
+    async def go():
+        out = [
+            c
+            async for c in tracing.observe_turn(
+                message="help",
+                session_id=SSO_SESSION,
+                client_code=CLIENT_CODE,
+                pool=pool,
+                platform="web",
+                screen_name="holdings",
+                frontend_version="frontendv1.0.16",
+                run=run,
+            )
+        ]
+        pending = list(tracing._pending)
+        if pending:
+            await asyncio.gather(*pending)
+        return out
+
+    assert _run(go()) == ["ok"]
+    root = next(s for s in mirror.spans if s.name == "chat_turn")
+    assert root.ended
+    # start_root received initial context; end update has the full bag.
+    assert root.kw.get("metadata", {}).get("platform") == "web"
+    assert root.kw.get("version") == "backendv1.0.11"
+    final_meta = {}
+    for u in root.updates:
+        if "metadata" in u and u["metadata"]:
+            final_meta.update(u["metadata"])
+    assert final_meta["platform"] == "web"
+    assert final_meta["screen_name"] == "holdings"
+    assert final_meta["frontend_version"] == "frontendv1.0.16"
+    assert final_meta["backend_version"] == "backendv1.0.11"
+    assert final_meta["turn_seq"] == 7
+    assert final_meta["ticket_id"] == 7551234
+    assert "latency_ms" in final_meta
+    assert final_meta["lf_trace_id"] == format(0xABCDEF0123456789, "032x")
+
+    # Postgres row's root span metadata matches.
+    assert pool.calls
+    import json
+
+    spans = json.loads(pool.calls[0][1][10])
+    assert spans[0]["metadata"]["turn_seq"] == 7
+    assert spans[0]["metadata"]["ticket_id"] == 7551234
+
+
+def test_feedback_score_uses_trace_id_when_joinable(mirror):
+    langfuse_mirror.create_feedback_score(
+        rating="up",
+        trace_id="abc123",
+        session_id=THREAD,
+        anchor_seq=7,
+        source="agent",
+    )
+    assert len(mirror.scores) == 1
+    score = mirror.scores[0]
+    assert score["name"] == "user-feedback"
+    assert score["value"] == 1
+    assert score["data_type"] == "BOOLEAN"
+    assert score["trace_id"] == "abc123"
+    assert score["session_id"] is None  # prefer trace over session
+    assert score["metadata"]["anchor_seq"] == 7
+
+
+def test_feedback_score_falls_back_to_session(mirror):
+    langfuse_mirror.create_feedback_score(
+        rating="down", session_id=THREAD, anchor_seq=3, source="flow"
+    )
+    score = mirror.scores[0]
+    assert score["value"] == 0
+    assert score["session_id"] == THREAD
+    assert score["trace_id"] is None
+
+
+def test_feedback_score_failure_is_swallowed(monkeypatch):
+    monkeypatch.setattr(langfuse_mirror, "_client", _ExplodingClient())
+    monkeypatch.setattr(langfuse_mirror, "_ENABLED", True)
+    langfuse_mirror.create_feedback_score(rating="up", session_id=THREAD)
+
+
+def test_lookup_lf_trace_id_matches_turn_seq():
+    class Pool:
+        async def fetch(self, sql, *args):
+            return [
+                {
+                    "spans": [
+                        {
+                            "metadata": {
+                                "turn_seq": 7,
+                                "lf_trace_id": "trace-for-7",
+                            }
+                        }
+                    ]
+                },
+                {
+                    "spans": [
+                        {
+                            "metadata": {
+                                "turn_seq": 3,
+                                "lf_trace_id": "trace-for-3",
+                            }
+                        }
+                    ]
+                },
+            ]
+
+    assert (
+        _run(
+            tracing.lookup_lf_trace_id(
+                Pool(), thread_id=THREAD, turn_seq=3
+            )
+        )
+        == "trace-for-3"
+    )
+
+
+def test_emit_ticket_observation(mirror):
+    langfuse_mirror.emit_ticket_observation(
+        session_id=THREAD,
+        user_id="hashed",
+        ticket_id=99,
+        reason="General Query",
+        platform="web",
+        backend_version="backendv1.0.11",
+    )
+    roots = [s for s in mirror.spans if s.name == "raise_ticket"]
+    assert len(roots) == 1
+    assert roots[0].ended
+    assert roots[0].kw["metadata"]["ticket_id"] == 99
+    assert roots[0]._otel_span.attributes["session.id"] == THREAD

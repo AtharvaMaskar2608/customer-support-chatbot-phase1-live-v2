@@ -93,12 +93,25 @@ def configure(mask: Any = None) -> None:
         _client, _ENABLED = None, False
 
 
-def start_root(*, name: str, input: Any) -> Any:
+def start_root(
+    *,
+    name: str,
+    input: Any = None,
+    metadata: dict | None = None,
+    version: str | None = None,
+) -> Any:
     """Open the trace root. Returns an opaque handle, or None when inert."""
     if not enabled():
         return None
     try:
-        return _client.start_observation(name=name, as_type="span", input=input)
+        kwargs: dict[str, Any] = {"name": name, "as_type": "span"}
+        if input is not None:
+            kwargs["input"] = input
+        if metadata:
+            kwargs["metadata"] = metadata
+        if version:
+            kwargs["version"] = version
+        return _client.start_observation(**kwargs)
     except Exception as exc:
         logger.warning("langfuse root failed error=%s", type(exc).__name__)
         return None
@@ -137,6 +150,41 @@ def set_identity(handle: Any, *, user_id: str | None, session_id: str | None) ->
         logger.warning("langfuse identity failed error=%s", type(exc).__name__)
 
 
+def set_metadata(handle: Any, metadata: dict | None) -> None:
+    """Merge metadata onto an open span (best-effort)."""
+    if handle is None or not enabled() or not metadata:
+        return
+    try:
+        handle.update(metadata=metadata)
+    except Exception as exc:
+        logger.warning("langfuse metadata failed error=%s", type(exc).__name__)
+
+
+def trace_id(handle: Any) -> str | None:
+    """Hex Langfuse/OTel trace id for an open (or just-ended) root handle."""
+    if handle is None:
+        return None
+    try:
+        otel = getattr(handle, "_otel_span", None)
+        if otel is None:
+            return None
+        get_ctx = getattr(otel, "get_span_context", None)
+        if not callable(get_ctx):
+            # Test doubles may stash the id directly.
+            direct = getattr(otel, "trace_id", None)
+            return format(direct, "032x") if isinstance(direct, int) else (
+                str(direct) if direct else None
+            )
+        ctx = get_ctx()
+        tid = getattr(ctx, "trace_id", None)
+        if isinstance(tid, int) and tid:
+            return format(tid, "032x")
+        return str(tid) if tid else None
+    except Exception as exc:
+        logger.warning("langfuse trace_id failed error=%s", type(exc).__name__)
+        return None
+
+
 def end(handle: Any, **fields: Any) -> None:
     """Update and close a span. Unset fields are dropped so we never overwrite
     something with None."""
@@ -149,6 +197,75 @@ def end(handle: Any, **fields: Any) -> None:
         handle.end()
     except Exception as exc:
         logger.warning("langfuse end failed error=%s", type(exc).__name__)
+
+
+def create_feedback_score(
+    *,
+    rating: str,
+    trace_id: str | None = None,
+    session_id: str | None = None,
+    anchor_seq: int | None = None,
+    source: str | None = None,
+) -> None:
+    """BOOLEAN ``user-feedback`` score (1=up, 0=down). Best-effort only."""
+    if not enabled():
+        return
+    if not trace_id and not session_id:
+        return
+    try:
+        value = 1 if rating == "up" else 0
+        meta = {}
+        if anchor_seq is not None:
+            meta["anchor_seq"] = anchor_seq
+        if source:
+            meta["source"] = source
+        _client.create_score(
+            name="user-feedback",
+            value=value,
+            data_type="BOOLEAN",
+            trace_id=trace_id,
+            session_id=session_id if not trace_id else None,
+            comment=f"rating={rating}",
+            metadata=meta or None,
+        )
+    except Exception as exc:
+        logger.warning("langfuse score failed error=%s", type(exc).__name__)
+
+
+def emit_ticket_observation(
+    *,
+    session_id: str | None,
+    user_id: str | None,
+    ticket_id: Any,
+    reason: str | None = None,
+    platform: str | None = None,
+    screen_name: str | None = None,
+    backend_version: str | None = None,
+) -> None:
+    """Short-lived root for help-card ``/api/ticket`` (no observe_turn there)."""
+    if not enabled() or ticket_id is None:
+        return
+    handle = None
+    try:
+        meta = {"ticket_id": ticket_id}
+        if reason:
+            meta["reason"] = reason
+        if platform:
+            meta["platform"] = platform
+        if screen_name:
+            meta["screen_name"] = screen_name
+        if backend_version:
+            meta["backend_version"] = backend_version
+        handle = start_root(
+            name="raise_ticket",
+            metadata=meta,
+            version=backend_version,
+        )
+        set_identity(handle, user_id=user_id, session_id=session_id)
+        end(handle, metadata=meta, output={"ticketId": ticket_id})
+    except Exception as exc:
+        logger.warning("langfuse ticket obs failed error=%s", type(exc).__name__)
+        end(handle)
 
 
 def shutdown() -> None:

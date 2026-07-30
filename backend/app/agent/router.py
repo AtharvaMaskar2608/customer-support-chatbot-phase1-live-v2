@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from app import config
+from app.agent import langfuse_mirror, tracing
 from app.agent.ctx import ToolCtx, ToolError, error_json_response
 from app.agent.loop import run_chat_stream
 from app.agent.tickets import run_raise_ticket, ticket_memo
@@ -53,6 +54,16 @@ class TicketRequest(BaseModel):
 
 def _missing_credentials() -> JSONResponse:
     return JSONResponse(status_code=400, content={"error": "MISSING_CREDENTIALS"})
+
+
+def _trim_header(value: str | None, *, max_len: int = 64) -> str | None:
+    """Optional client-context headers: trim, drop empties, hard-cap length."""
+    if value is None:
+        return None
+    trimmed = value.strip()
+    if not trimmed:
+        return None
+    return trimmed[:max_len]
 
 
 def _anthropic_client(request: Request):
@@ -119,6 +130,23 @@ async def feedback(
     store.record_feedback(
         thread, anchor_seq=anchor_seq, rating=body.rating, source=body.source
     )
+    # CHO-286: best-effort Langfuse score. Postgres feedback row is already
+    # enqueued; a mirror miss/outage must not change this response.
+    try:
+        lf_id = await tracing.lookup_lf_trace_id(
+            getattr(request.app.state, "pg_pool", None),
+            thread_id=thread.id,
+            turn_seq=anchor_seq,
+        )
+        langfuse_mirror.create_feedback_score(
+            rating=body.rating,
+            trace_id=lf_id,
+            session_id=thread.id if not lf_id else None,
+            anchor_seq=anchor_seq,
+            source=body.source,
+        )
+    except Exception as exc:
+        logger.warning("feedback score failed error=%s", type(exc).__name__)
     return {"ok": True}
 
 
@@ -128,6 +156,9 @@ async def ticket(
     authorization: str | None = Header(default=None),
     x_session_id: str | None = Header(default=None),
     x_user_id: str | None = Header(default=None),
+    x_platform: str | None = Header(default=None),
+    x_screen_name: str | None = Header(default=None),
+    x_frontend_version: str | None = Header(default=None),
 ):
     """Help-card escalation (CHO-218): raise a real Freshdesk ticket through
     the same core the raise_support_ticket agent tool uses — identical
@@ -151,6 +182,9 @@ async def ticket(
         sso_jwt=authorization,
         client_code=x_user_id,
         http_client=request.app.state.http_client,
+        platform=_trim_header(x_platform),
+        screen_name=_trim_header(x_screen_name),
+        frontend_version=_trim_header(x_frontend_version),
     )
     store = request.app.state.conversation_store
     thread = await store.get_thread(x_session_id, client_code=x_user_id)
@@ -170,6 +204,17 @@ async def ticket(
         content=[{"type": "text", "text": ticket_memo(ticket_id, body.reason)}],
         meta={"flow": "ticket", "ticketId": ticket_id, "reason": body.reason},
     )
+    # CHO-286: /api/ticket is outside observe_turn — emit a short Langfuse
+    # observation so the session still carries ticket_id when the mirror is on.
+    langfuse_mirror.emit_ticket_observation(
+        session_id=thread.id,
+        user_id=tracing.stable_user_id(x_user_id),
+        ticket_id=ticket_id,
+        reason=body.reason,
+        platform=ctx.platform,
+        screen_name=ctx.screen_name,
+        backend_version=config.bot_version(),
+    )
     return {"ticketId": ticket_id, "status": result["status"]}
 
 
@@ -180,6 +225,9 @@ async def chat(
     authorization: str | None = Header(default=None),
     x_session_id: str | None = Header(default=None),
     x_user_id: str | None = Header(default=None),
+    x_platform: str | None = Header(default=None),
+    x_screen_name: str | None = Header(default=None),
+    x_frontend_version: str | None = Header(default=None),
 ):
     if not authorization or not x_session_id or not x_user_id:
         return _missing_credentials()
@@ -195,6 +243,9 @@ async def chat(
         pg_pool=getattr(request.app.state, "pg_pool", None),
         report_files=request.app.state.report_files,
         contract_note_refs=_ref_store(request),
+        platform=_trim_header(x_platform),
+        screen_name=_trim_header(x_screen_name),
+        frontend_version=_trim_header(x_frontend_version),
     )
     return StreamingResponse(
         run_chat_stream(

@@ -405,6 +405,16 @@ def langfuse_base_url() -> str | None:
     return _secret("LANGFUSE_BASE_URL")
 
 
+def bot_version() -> str | None:
+    """Deploy/build tag stamped onto each turn root (BOT_VERSION env).
+
+    Optional — typically the backend image tag (e.g. ``backendv1.0.11``) injected
+    at ``docker run`` / compose time. Absent ⇒ the field is omitted from traces.
+    """
+    value = os.environ.get("BOT_VERSION", "").strip()
+    return value or None
+
+
 # --- Trace viewer dashboard (CHO-262) ---------------------------------------
 #
 # The read-only admin dashboard over the agent_traces table is gated by a

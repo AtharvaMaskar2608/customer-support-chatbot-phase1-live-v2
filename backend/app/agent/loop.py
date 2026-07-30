@@ -229,6 +229,9 @@ async def run_chat_stream(
             session_id=store_session_id,
             client_code=ctx.client_code,
             pool=ctx.pg_pool,
+            platform=ctx.platform,
+            screen_name=ctx.screen_name,
+            frontend_version=ctx.frontend_version,
             run=lambda: _chat_events(
                 message=message,
                 ctx=ctx,
@@ -510,6 +513,7 @@ async def _chat_events(
                 ):
                     ticket_id = outcome.envelope.get("ticketId")
                     reason = str((block.get("input") or {}).get("reason") or "")
+                    tracing.bind_ticket_id(ticket_id)
                     store.append_turn(
                         thread,
                         role="user",
@@ -540,13 +544,15 @@ async def _chat_events(
                 and all(a is not None for a in artifacts)
             ):
                 counters = agent_caps.evaluate(thread)
+                last_seq = thread.turns[-1].seq if thread.turns else 0
+                tracing.bind_turn_seq(last_seq)
                 yield _sse(
                     "done",
                     {
                         "thread": {
                             "taskTurns": counters.task_user_turns,
                             "sessionTurns": counters.session_user_turns,
-                            "lastSeq": thread.turns[-1].seq if thread.turns else 0,
+                            "lastSeq": last_seq,
                         }
                     },
                 )
@@ -565,13 +571,15 @@ async def _chat_events(
         # derived counters. Auth expiry is short-circuited above in the
         # tool-round branch (CHO-231), so it never reaches here.
         counters = agent_caps.evaluate(thread)
+        last_seq = thread.turns[-1].seq if thread.turns else 0
+        tracing.bind_turn_seq(last_seq)
         yield _sse(
             "done",
             {
                 "thread": {
                     "taskTurns": counters.task_user_turns,
                     "sessionTurns": counters.session_user_turns,
-                    "lastSeq": thread.turns[-1].seq if thread.turns else 0,
+                    "lastSeq": last_seq,
                 }
             },
         )
