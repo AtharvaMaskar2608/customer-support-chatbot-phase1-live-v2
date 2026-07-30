@@ -223,6 +223,23 @@ def parameter_question(text: str | None) -> str | None:
     return None
 
 
+def preamble_before_tool(text: str | None) -> str | None:
+    """Any assistant text emitted before the first tool call, as a SIZE marker
+    ("142-chars"), or None when the call was silent (CHO-284).
+
+    Categorical on purpose. `parameter_question` above asks *which forbidden
+    phrase* preceded the call; this asks whether ANYTHING did. The live failure
+    this exists for was a fluent, entirely true sentence — not a banned phrase —
+    which the user reads as a finished answer just before a loading indicator
+    appears under it. So the check cannot be a phrase list; it is emptiness.
+
+    Returns the length, never the words, keeping the same PII discipline as the
+    rest of this module: a report records `preamble-before-tool:142-chars`.
+    """
+    stripped = (text or "").strip()
+    return f"{len(stripped)}-chars" if stripped else None
+
+
 # --- exact-recall matchers (E4) ----------------------------------------------
 
 _MONTHS = (

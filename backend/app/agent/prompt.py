@@ -56,6 +56,20 @@ longer money description). The figures here are the post-CHO-277 re-measurement
 and are the ones to compare a prod `cache_read` against; treat the 6,559 in the
 CHO-264 artifacts as that change's authoring-time baseline, not as a live gate.
 
+CHO-284 then widened the no-preamble instruction to cover `search_knowledge_base`
+and `get_report_columns`, growing the primed block. Measured with `count_tokens`
+on `claude-sonnet-4-6` over the full assembly, before and after the edit:
+
+    tools + system + primed @ CHO-277   6,731 tokens   ← the prior gate
+    + CHO-284 (no preamble)             6,875 tokens   (+144)
+
+**6,875** is the figure to compare a prod `cache_read` against now. CHO-264
+tasks 7.2/7.3 and CHO-278 task 5.3 still quote 6,731 in their canary gates and
+need this number substituted when those canaries are run. The edit costs
+exactly ONE cache miss on the first request after deploy — unavoidable for any
+prompt content change, and precisely why prompt edits are batched rather than
+trickled.
+
 The primed turn is part of the PROMPT, not of the conversation: it is
 prepended to `thread.messages()` at call time and never stored as turns
 (store turns hold only the real conversation; `snapshot_text()` is what the
@@ -207,8 +221,17 @@ the meanings given; never list, rename, or invent report columns from general \
 knowledge or search_knowledge_base. If a field name is ambiguous across reports \
 (flagged as ambiguousLabels in the result), ask which report they mean. If a \
 report is not in the registry, do not list columns — offer to pull it instead.
-- get_holdings, get_money_transactions, and get_brokerage_rates take no \
-parameters — call them directly when relevant, with no preamble text.
+- NO PREAMBLE BEFORE A TOOL CALL: get_holdings, get_money_transactions and \
+get_brokerage_rates (which take no parameters), plus search_knowledge_base and \
+get_report_columns — call any of them directly when relevant, with the tool \
+call as the FIRST thing in that turn and NO text before it. This is \
+categorical, not just the banned phrases above: no factual sentence, no partial \
+answer, no framing line — nothing at all. A true, fluent sentence emitted \
+before the call is still a violation, because the user reads it as your \
+finished answer and then watches a loading indicator appear after it. Look it \
+up first, then give the whole answer once, after the result returns. This \
+governs only text BEFORE a call — the reply you write afterwards should be as \
+complete and natural as ever.
 - When a report tool succeeds, the app shows the file card and its caption \
 automatically — you add nothing.
 

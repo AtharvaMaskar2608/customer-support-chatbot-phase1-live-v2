@@ -15,6 +15,7 @@ from evals.cases import (
     e4_fact_recall,
     e6_report_columns,
     e7_kb_followup,
+    e8_silent_tool_call,
 )
 
 ALL_CASES = (
@@ -25,6 +26,8 @@ ALL_CASES = (
     e4_fact_recall.CASE,
     e6_report_columns.CASE,
     e7_kb_followup.CASE,
+    e8_silent_tool_call.CASE,
+    e8_silent_tool_call.CASE_COLUMNS,
 )
 
 CASES_BY_ID = {case.id: case for case in ALL_CASES}

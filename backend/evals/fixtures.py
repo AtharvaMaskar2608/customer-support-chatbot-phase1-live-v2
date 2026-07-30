@@ -506,6 +506,82 @@ KB_GENERIC_RESULTS = {
     ],
 }
 
+# --- E8: the CHO-284 reproduction ---------------------------------------------
+#
+# The live trace that opened CHO-284 was "When does intraday square off happen":
+# the model emitted a complete, correct sentence about RMS square-off in the SAME
+# round it called `search_knowledge_base`, so the user saw a finished answer, then
+# a loading pill, then more answer. E8 probes that exact question, so the topic is
+# one the model plainly knows enough about to answer from memory — which is what
+# makes a silent call a real assertion rather than a tautology.
+
+KB_INTRADAY_RESULTS = {
+    "kind": "ok",
+    "results": [
+        {
+            "id": 901,
+            "topic": "RMS",
+            "section": "RMS",
+            "question": "When are intraday positions squared off?",
+            "answer": (
+                "Open intraday positions are squared off by the risk team "
+                "before the session closes; the cut-off is 3:10 pm for equity "
+                "and 3:20 pm for F&O."
+            ),
+            "tat": None,
+            "score": 0.032787,
+        },
+        {
+            "id": 902,
+            "topic": "RMS",
+            "section": "Orders",
+            "question": "Can I avoid an auto square-off?",
+            "answer": (
+                "Convert the position to delivery before the cut-off, with the "
+                "full amount available as clear funds."
+            ),
+            "tat": None,
+            "score": 0.031746,
+        },
+        {
+            "id": 903,
+            "topic": "RMS",
+            "section": "Charges",
+            "question": "Is there a charge for an auto square-off?",
+            "answer": (
+                "An auto square-off carries a flat per-order charge in addition "
+                "to the usual brokerage."
+            ),
+            "tat": None,
+            "score": 0.030769,
+        },
+        {
+            "id": 904,
+            "topic": "RMS",
+            "section": "RMS",
+            "question": "What triggers an early square-off?",
+            "answer": (
+                "A margin shortfall can trigger a square-off before the cut-off "
+                "once a margin call is not met."
+            ),
+            "tat": None,
+            "score": 0.029851,
+        },
+        {
+            "id": 905,
+            "topic": "Orders",
+            "section": "Orders",
+            "question": "Where do I see squared-off positions?",
+            "answer": (
+                "Squared-off positions move to the Positions history in the "
+                "FinX app and appear on that day's contract note."
+            ),
+            "tat": None,
+            "score": 0.028986,
+        },
+    ],
+}
+
 
 # --- E6: report columns, spent variant vs the real registry ------------------
 #
