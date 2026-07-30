@@ -84,6 +84,61 @@ def run() -> harness.CaseOutcome:
     if stale:
         failures.append("stale-label:" + ",".join(stale))
 
+    # Cheap CHO-282 guard: even a one-column answer must not reach for a table.
+    table = assertions.pipe_table(probe.text)
+    observed["pipeTable"] = table
+    if table:
+        failures.append(f"pipe-table:{table}")
+
+    return harness.finish(probe, failures, observed)
+
+
+def run_multi() -> harness.CaseOutcome:
+    """E6t — the whole column list comes back as records, never as a table.
+
+    A one-column question (E6 above) gives the model no reason to reach for a
+    table; asking for EVERY column is what does, and it is the shape CHO-282 was
+    opened for. Two mechanical checks on the reply:
+
+    * no GFM pipe-table signature anywhere — the chat is a ~310–420px column in
+      every context it renders in, so a table lands either as literal `|`/`-`
+      text or as CHO-282's cramped scrollable fallback;
+    * bold headlines are actually present, so "no table" is satisfied by the
+      record convention rather than by a run-on paragraph that merely avoids
+      pipes.
+
+    The registry-backed core runs for real (design D2), so the labels the model
+    is formatting are the genuine ledger ones.
+    """
+    responses = {
+        "get_report_columns": harness.PASSTHROUGH,
+        "search_knowledge_base": harness.ok(fixtures.KB_GENERIC_RESULTS),
+        "open_report_form": harness.PASSTHROUGH,
+    }
+
+    with harness.eval_session(responses) as session:
+        session.user("hi")
+        session.assistant("Hi! Ask me anything about your FinX account.")
+
+        probe = session.probe("explain what every column in my ledger report means")
+
+    failures: list[str] = []
+    observed: dict = {}
+
+    if "get_report_columns" not in probe.tool_names:
+        failures.append("get_report_columns-not-called")
+
+    table = assertions.pipe_table(probe.text)
+    observed["pipeTable"] = table
+    if table:
+        failures.append(f"pipe-table:{table}")
+
+    # Paired bold markers — one per record headline under the convention.
+    headlines = (probe.text or "").count("**") // 2
+    observed["boldHeadlines"] = headlines
+    if headlines < 2:
+        failures.append(f"record-headlines-missing:{headlines}")
+
     return harness.finish(probe, failures, observed)
 
 
@@ -92,4 +147,11 @@ CASE = harness.Case(
     title="report columns re-fetched before any column is described",
     run=run,
     notes="REPORT COLUMNS RULE, prompt.py:186-192",
+)
+
+CASE_MULTI = harness.Case(
+    id="E6t",
+    title="a multi-column answer uses records, not a markdown table",
+    run=run_multi,
+    notes="MULTI-FACT REPLIES USE RECORD SHAPE, prompt.py (CHO-282)",
 )

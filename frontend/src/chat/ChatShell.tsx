@@ -48,7 +48,7 @@ import {
   DataFollowupChips,
   EmptyCardLine,
 } from './datacards/primitives'
-import { RichText } from './RichText'
+import { MessageText } from './MessageText'
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
@@ -864,11 +864,7 @@ function MessageView({
         </div>
       )
     case 'bot':
-      return (
-        <p className="text-[14.5px] leading-normal text-zinc-800 dark:text-zinc-100">
-          <RichText text={m.text} />
-        </p>
-      )
+      return <MessageText className="text-[14.5px] leading-normal text-zinc-800 dark:text-zinc-100" text={m.text} />
     case 'agent':
       // Streamed reply — same look as `bot`, pre-wrap so the model's line
       // breaks and paragraphs survive (raw markdown beyond ** is not sent).
@@ -876,9 +872,10 @@ function MessageView({
       // bubbles only, never mid-stream text (CHO-217).
       return (
         <div className="flex flex-col gap-1.5">
-          <p className="text-[14.5px] leading-normal whitespace-pre-wrap text-zinc-800 dark:text-zinc-100">
-            <RichText text={m.text} />
-          </p>
+          <MessageText
+            className="text-[14.5px] leading-normal whitespace-pre-wrap text-zinc-800 dark:text-zinc-100"
+            text={m.text}
+          />
           {m.anchorSeq !== undefined && (
             <FeedbackChip rating={m.feedback} onRate={(rating) => onRate(m.id, rating)} />
           )}

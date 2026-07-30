@@ -56,19 +56,22 @@ longer money description). The figures here are the post-CHO-277 re-measurement
 and are the ones to compare a prod `cache_read` against; treat the 6,559 in the
 CHO-264 artifacts as that change's authoring-time baseline, not as a live gate.
 
-CHO-284 then widened the no-preamble instruction to cover `search_knowledge_base`
-and `get_report_columns`, growing the primed block. Measured with `count_tokens`
-on `claude-sonnet-4-6` over the full assembly, before and after the edit:
+Two edits then landed together in the same batch: CHO-284 widened the
+no-preamble instruction to cover `search_knowledge_base` and
+`get_report_columns`, and CHO-282 added the record-oriented formatting
+convention. Both grow the primed block. Re-measured with `count_tokens` on
+`claude-sonnet-4-6` over the full assembly, one edit at a time:
 
     tools + system + primed @ CHO-277   6,731 tokens   ← the prior gate
     + CHO-284 (no preamble)             6,875 tokens   (+144)
+    + CHO-282 (record shape)            7,077 tokens   (+202)
 
-**6,875** is the figure to compare a prod `cache_read` against now. CHO-264
+**7,077** is the figure to compare a prod `cache_read` against now. CHO-264
 tasks 7.2/7.3 and CHO-278 task 5.3 still quote 6,731 in their canary gates and
-need this number substituted when those canaries are run. The edit costs
-exactly ONE cache miss on the first request after deploy — unavoidable for any
-prompt content change, and precisely why prompt edits are batched rather than
-trickled.
+need this number substituted when those canaries are run. Batched as one
+deploy, the two edits cost exactly ONE cache miss on the first request after
+deploy — unavoidable for any prompt content change, and precisely why prompt
+edits are batched rather than trickled.
 
 The primed turn is part of the PROMPT, not of the conversation: it is
 prepended to `thread.messages()` at call time and never stored as turns
@@ -200,6 +203,24 @@ and offer to raise a support ticket — refusing outright is always wrong.
 - Keep how-to answers SHORT: lead with the direct answer in 1–3 plain \
 sentences. No headings, no bullet lists, no preamble — add steps or detail \
 only when the user asks for them.
+- MULTI-FACT REPLIES USE RECORD SHAPE, NEVER A TABLE: when a reply presents \
+more than one related fact as a set — what several report columns mean, a \
+breakdown of charges, a handful of transactions — give each record a bold \
+headline line and put its fields on plain lines under it:
+
+**Net Qty**
+Net position after buys and sells this period
+
+**Realized P&L**
+Booked gain or loss on fully closed positions
+
+Records need not carry the same number of fields: fields stack as lines under \
+a headline, so nothing has to line up across records. NEVER use markdown \
+table syntax — no pipe characters as columns, no |---| separator row. The \
+chat is a narrow column on both phone and desktop and a table renders badly \
+there, while records stay readable at any width. Records are not bullet lists \
+and do not loosen the SHORT rule above — a single-fact answer is still just a \
+plain sentence.
 - BROKERAGE RULE (always): any question about brokerage, charges the client \
 pays, their rates, fees or slab MUST call get_brokerage_rates and answer \
 from its result — never answer brokerage questions from general knowledge \
