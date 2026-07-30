@@ -17,13 +17,14 @@ is subordinate in every direction:
 Identity mapping (see the `trace-mirror` capability):
 
     Langfuse session_id  <-  conversation Thread.id   (same value as thread_id)
-    Langfuse user_id     <-  _stable_id(client_code)  (same HMAC Postgres holds)
+    Langfuse user_id     <-  client_code              (raw; same value Postgres holds)
 
 Both are the values Postgres already stores, which is what keeps the two stores
 joinable — a Langfuse trace can be pivoted to its `agent_traces` row on either
-key. The FinX SSO session id is NOT sent in any form: it is a live credential
-(the report endpoints authenticate with it), and `observability-tracing`
-forbids storing it.
+key. The client code rides raw: it is an internal account identifier, not
+personal data, so traces stay searchable by customer. The FinX SSO session id
+is NOT sent in any form — that one is a live credential (the report endpoints
+authenticate with it), which is a security constraint, not a privacy one.
 
 Identity is applied AFTER the root span opens, directly onto the OTel span,
 rather than through ``propagate_attributes``. That is deliberate: the thread id

@@ -100,9 +100,13 @@ def redact(data: Any) -> Any:
 
 
 def _stable_id(value: str | None) -> str | None:
-    """HMAC hash of a sensitive identifier (session id / client code) so a
-    conversation's turns still group into one thread/user without storing the
-    raw credential. Pseudonymisation, not secrecy of the mapping."""
+    """HMAC hash of a sensitive identifier so turns can be grouped without
+    storing the raw value. Pseudonymisation, not secrecy of the mapping.
+
+    No longer applied to `user_id` (CHO-286 stores the client code raw — it is
+    an account identifier, not personal data). Retained for the SSO session id,
+    which is a live credential and may only ever be correlated by hash.
+    """
     if not value:
         return None
     key = config.tracing_salt().encode()
@@ -379,7 +383,12 @@ async def observe_turn(
     _ = session_id
     trace = _Trace(
         thread_id=None,
-        user_id=_stable_id(client_code),
+        # CHO-286: the client code is stored RAW. It is an internal account
+        # identifier, not personal data, and hashing it only cost the ability to
+        # look a customer up in a trace. The SSO session id is a different
+        # matter and is still never stored — that is a credential (the report
+        # endpoints authenticate with it), not a privacy question.
+        user_id=client_code,
         input=redact(message),
         start_ms=_now_ms(),
     )
