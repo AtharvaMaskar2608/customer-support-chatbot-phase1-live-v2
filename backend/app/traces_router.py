@@ -1,9 +1,11 @@
 """Trace viewer dashboard API (CHO-262) — read-only endpoints over the
 ``agent_traces`` table (CHO-261) for an admin operator UI.
 
-Everything here is already safe to expose: ``thread_id`` / ``user_id`` are HMAC
-hashes, and span ``input`` / ``output`` and the turn ``input`` / ``output`` were
-PII-masked at write time (see ``app.agent.tracing``). This module only reads.
+Everything here is already safe to expose: ``thread_id`` is the conversation
+store's own uuid, ``user_id`` is the client code stored raw (CHO-287 — an
+internal account identifier, not personal data), and span ``input`` / ``output``
+and the turn ``input`` / ``output`` were PII-masked at write time (see
+``app.agent.tracing``). This module only reads.
 
 Auth is a single shared admin token, NOT the per-user FinX session auth — a
 viewer is an operator, not a chat user. The token gates the whole router:

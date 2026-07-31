@@ -14,17 +14,23 @@
 # forward to :8080; :8000 is exposed for direct debugging only.
 services:
   backend:
-    image: 829433345651.dkr.ecr.ap-south-1.amazonaws.com/customer-support-chatbot:backendv1.0.11
+    image: 829433345651.dkr.ecr.ap-south-1.amazonaws.com/customer-support-chatbot:backendv1.0.12
     env_file: .env                 # secrets: DATABASE_URL, ANTHROPIC_API_KEY, OPENAI_API_KEY, FRESHDESK_*, ...
     environment:
-      # CHO-286: stamp the image tag onto each turn root (override via .env if needed).
-      BOT_VERSION: backendv1.0.11
+      # CHO-286: stamp the image tag onto each turn root. Keep this EQUAL to the
+      # backend image tag above — traces are labelled with it, so a stale value
+      # silently misattributes every turn to the old build.
+      # NOTE: `environment:` wins over `env_file:`, so this canNOT be overridden
+      # from .env. And prod does not run compose at all (§4 tarball path uses
+      # `docker run --env-file`), where this block is never read — BOT_VERSION
+      # must be set in the server's own .env there. See docs/deployment.md.
+      BOT_VERSION: backendv1.0.12
     ports:
       - "8000:8000"
     restart: unless-stopped
 
   frontend:
-    image: 829433345651.dkr.ecr.ap-south-1.amazonaws.com/customer-support-chatbot:frontendv1.0.16
+    image: 829433345651.dkr.ecr.ap-south-1.amazonaws.com/customer-support-chatbot:frontendv1.0.17
     ports:
       - "8080:80"
     restart: unless-stopped
