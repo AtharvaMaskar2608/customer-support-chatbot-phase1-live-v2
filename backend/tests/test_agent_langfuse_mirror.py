@@ -230,29 +230,45 @@ def test_llm_round_is_a_generation_with_native_usage(mirror):
 
 
 def test_identity_matches_what_postgres_stores(mirror):
-    """The join key: session = Thread.id, user = the client code — both the
-    identical values the Postgres row stores."""
+    """Join keys (CHO-288): Langfuse session = HMAC(FinX SessionId); Postgres
+    thread_id and Langfuse metadata.thread_id = Thread.id; user = raw client code."""
     pool = FakePool()
     _drive_turn(pool)
 
-    attrs = _by_name(mirror)["chat_turn"]._otel_span.attributes
-    assert attrs["session.id"] == THREAD
+    root = _by_name(mirror)["chat_turn"]
+    attrs = root._otel_span.attributes
+    hashed = tracing.stable_session_id(SSO_SESSION)
+    assert attrs["session.id"] == hashed
     assert attrs["user.id"] == CLIENT_CODE  # raw: an account id, not PII
+
+    # Metadata bag includes thread_id (set_metadata on bind and/or end).
+    metas = [u["metadata"] for u in root.updates if u.get("metadata")]
+    assert any(m.get("thread_id") == THREAD for m in metas)
 
     insert = [c for c in pool.calls if "INSERT INTO agent_traces" in c[0]][0]
     stored_thread, stored_user = insert[1][0], insert[1][1]
-    assert attrs["session.id"] == stored_thread
+    assert stored_thread == THREAD
     assert attrs["user.id"] == stored_user
 
 
-def test_main_menu_reset_starts_a_new_session(mirror):
-    """CHO-275, restated for the mirror: a new thread must not roll up."""
+def test_main_menu_keeps_langfuse_session_changes_thread_metadata(mirror):
+    """CHO-288: Main Menu mints a new Thread.id but Langfuse session stays the
+    hashed FinX SessionId — conversations split via metadata.thread_id."""
     _drive_turn(FakePool(), thread_id="conv-uuid-first")
     _drive_turn(FakePool(), thread_id="conv-uuid-second")
     roots = [s for s in mirror.spans if s.name == "chat_turn"]
     assert len(roots) == 2
+    hashed = tracing.stable_session_id(SSO_SESSION)
     sessions = [r._otel_span.attributes["session.id"] for r in roots]
-    assert sessions == ["conv-uuid-first", "conv-uuid-second"]
+    assert sessions == [hashed, hashed]
+    thread_ids = []
+    for r in roots:
+        meta = next(
+            (u.get("metadata") for u in r.updates if u.get("metadata")),
+            r.kw.get("metadata"),
+        )
+        thread_ids.append(meta.get("thread_id") if meta else None)
+    assert thread_ids == ["conv-uuid-first", "conv-uuid-second"]
     # Same user across both — "everything this user did" is a user_id filter.
     users = {r._otel_span.attributes["user.id"] for r in roots}
     assert len(users) == 1
@@ -469,9 +485,10 @@ class _ExplodingStream:
 
 
 def test_concurrent_turns_do_not_cross_wire_identity(mirror):
-    """Two turns in flight at once must not share a session. Parenting is
-    explicit (off the parent handle) rather than via ambient OTel context
-    precisely so interleaved coroutines cannot braid each other's trees."""
+    """Two turns in flight at once must not braid children. Parenting is
+    explicit (off the parent handle) rather than via ambient OTel context.
+    CHO-288: same FinX SessionId → same Langfuse session; Thread.id differs
+    in metadata."""
 
     def one(thread_id):
         async def run():
@@ -488,7 +505,7 @@ def test_concurrent_turns_do_not_cross_wire_identity(mirror):
 
         return tracing.observe_turn(
             message="m", session_id=SSO_SESSION, client_code=CLIENT_CODE,
-            pool=FakePool(), run=run,
+            pool=FakePool(), run=run, finx_session_id=SSO_SESSION,
         )
 
     async def drain(gen):
@@ -501,9 +518,16 @@ def test_concurrent_turns_do_not_cross_wire_identity(mirror):
 
     roots = [s for s in mirror.spans if s.name == "chat_turn"]
     assert len(roots) == 2
-    assert {r._otel_span.attributes["session.id"] for r in roots} == {
-        "thread-A", "thread-B"
-    }
+    hashed = tracing.stable_session_id(SSO_SESSION)
+    assert {r._otel_span.attributes["session.id"] for r in roots} == {hashed}
+    thread_ids = set()
+    for r in roots:
+        meta = next(
+            (u.get("metadata") for u in r.updates if u.get("metadata")),
+            r.kw.get("metadata"),
+        )
+        thread_ids.add(meta.get("thread_id") if meta else None)
+    assert thread_ids == {"thread-A", "thread-B"}
     # Each root owns exactly its own model_round — no braiding.
     for r in roots:
         assert [c.name for c in r.children] == ["model_round"]
@@ -640,16 +664,36 @@ def test_lookup_lf_trace_id_matches_turn_seq():
 
 
 def test_emit_ticket_observation(mirror):
+    hashed = tracing.stable_session_id(SSO_SESSION)
     langfuse_mirror.emit_ticket_observation(
-        session_id=THREAD,
-        user_id="hashed",
+        session_id=hashed,
+        user_id=CLIENT_CODE,
         ticket_id=99,
         reason="General Query",
         platform="web",
         backend_version="backendv1.0.11",
+        thread_id=THREAD,
     )
     roots = [s for s in mirror.spans if s.name == "raise_ticket"]
     assert len(roots) == 1
     assert roots[0].ended
     assert roots[0].kw["metadata"]["ticket_id"] == 99
-    assert roots[0]._otel_span.attributes["session.id"] == THREAD
+    assert roots[0].kw["metadata"]["thread_id"] == THREAD
+    assert roots[0]._otel_span.attributes["session.id"] == hashed
+    assert roots[0]._otel_span.attributes["user.id"] == CLIENT_CODE
+
+
+def test_emit_api_observation_journey(mirror):
+    hashed = tracing.stable_session_id(SSO_SESSION)
+    tracing.emit_journey_api(
+        name="api.data.holdings",
+        finx_session_id=SSO_SESSION,
+        client_code=CLIENT_CODE,
+        thread_id=THREAD,
+        output={"ok": True, "kind": "ok"},
+    )
+    roots = [s for s in mirror.spans if s.name == "api.data.holdings"]
+    assert len(roots) == 1
+    assert roots[0].ended
+    assert roots[0]._otel_span.attributes["session.id"] == hashed
+    assert roots[0].kw["metadata"]["thread_id"] == THREAD

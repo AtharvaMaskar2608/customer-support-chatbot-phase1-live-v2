@@ -97,8 +97,22 @@ async def chat_reset(
     cap counters restart. No model call, idempotent."""
     if not authorization or not x_session_id or not x_user_id:
         return _missing_credentials()
-    await request.app.state.conversation_store.reset_thread(
-        x_session_id, client_code=x_user_id
+    store = request.app.state.conversation_store
+    # Capture the closing thread id before reset mints a new one (CHO-288).
+    prior = await store.get_thread(x_session_id, client_code=x_user_id)
+    prior_thread_id = prior.id
+    await store.reset_thread(x_session_id, client_code=x_user_id)
+    next_thread = await store.get_thread(x_session_id, client_code=x_user_id)
+    tracing.emit_journey_api(
+        name="api.chat_reset",
+        finx_session_id=x_session_id,
+        client_code=x_user_id,
+        thread_id=next_thread.id,
+        metadata={
+            "prior_thread_id": prior_thread_id,
+            "backend_version": config.bot_version(),
+        },
+        output={"ok": True},
     )
     return {"ok": True}
 
@@ -130,8 +144,9 @@ async def feedback(
     store.record_feedback(
         thread, anchor_seq=anchor_seq, rating=body.rating, source=body.source
     )
-    # CHO-286: best-effort Langfuse score. Postgres feedback row is already
-    # enqueued; a mirror miss/outage must not change this response.
+    # CHO-286/288: best-effort Langfuse score + journey observation. Postgres
+    # feedback row is already enqueued; a mirror miss/outage must not change
+    # this response. Session fallback uses hashed FinX SessionId (not Thread.id).
     try:
         lf_id = await tracing.lookup_lf_trace_id(
             getattr(request.app.state, "pg_pool", None),
@@ -141,12 +156,22 @@ async def feedback(
         langfuse_mirror.create_feedback_score(
             rating=body.rating,
             trace_id=lf_id,
-            session_id=thread.id if not lf_id else None,
+            session_id=(
+                tracing.stable_session_id(x_session_id) if not lf_id else None
+            ),
             anchor_seq=anchor_seq,
             source=body.source,
         )
     except Exception as exc:
         logger.warning("feedback score failed error=%s", type(exc).__name__)
+    tracing.emit_journey_api(
+        name="api.feedback",
+        finx_session_id=x_session_id,
+        client_code=x_user_id,
+        thread_id=thread.id,
+        metadata={"anchor_seq": anchor_seq, "source": body.source},
+        output={"ok": True, "rating": body.rating},
+    )
     return {"ok": True}
 
 
@@ -204,16 +229,17 @@ async def ticket(
         content=[{"type": "text", "text": ticket_memo(ticket_id, body.reason)}],
         meta={"flow": "ticket", "ticketId": ticket_id, "reason": body.reason},
     )
-    # CHO-286: /api/ticket is outside observe_turn — emit a short Langfuse
-    # observation so the session still carries ticket_id when the mirror is on.
+    # CHO-288: /api/ticket is outside observe_turn — journey observation with
+    # hashed FinX session + thread_id metadata + ticket_id.
     langfuse_mirror.emit_ticket_observation(
-        session_id=thread.id,
-        user_id=tracing.stable_user_id(x_user_id),
+        session_id=tracing.stable_session_id(x_session_id),
+        user_id=x_user_id,
         ticket_id=ticket_id,
         reason=body.reason,
         platform=ctx.platform,
         screen_name=ctx.screen_name,
         backend_version=config.bot_version(),
+        thread_id=thread.id,
     )
     return {"ticketId": ticket_id, "status": result["status"]}
 

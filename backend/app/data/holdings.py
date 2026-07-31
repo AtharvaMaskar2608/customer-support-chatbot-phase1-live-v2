@@ -26,6 +26,7 @@ import logging
 
 from fastapi import APIRouter, Header, Request
 
+from app.agent import tracing
 from app.agent.ctx import (
     ToolCtx,
     ToolError,
@@ -210,5 +211,17 @@ async def holdings(
     )
     result = await run_holdings(None, ctx)
     if isinstance(result, ToolError):
+        tracing.emit_journey_api(
+            name="api.data.holdings",
+            finx_session_id=x_session_id,
+            client_code=x_user_id,
+            output={"ok": False, "error": result.code},
+        )
         return error_json_response(result)
+    tracing.emit_journey_api(
+        name="api.data.holdings",
+        finx_session_id=x_session_id,
+        client_code=x_user_id,
+        output={"ok": True, "kind": result.get("kind")},
+    )
     return result

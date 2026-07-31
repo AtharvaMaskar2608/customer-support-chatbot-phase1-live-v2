@@ -332,6 +332,15 @@ async def greeting(
         greeting_key,
         clock.ist_now().isoformat(timespec="seconds"),
     )
+    # CHO-288: journey observation (no name / profile payload).
+    from app.agent import tracing  # local import: greeting is loaded early by loop
+
+    tracing.emit_journey_api(
+        name="api.greeting",
+        finx_session_id=x_session_id,
+        client_code=x_user_id,
+        output={"ok": True, "greetingKey": greeting_key},
+    )
     return {
         "firstName": first_name,
         "greetingKey": greeting_key,
