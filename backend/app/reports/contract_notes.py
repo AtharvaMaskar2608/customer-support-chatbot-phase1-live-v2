@@ -43,6 +43,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from app import config
+from app.agent import tracing
 from app.agent.ctx import (
     CODE_UPSTREAM_ERROR,
     ToolCtx,
@@ -461,7 +462,20 @@ async def contract_notes_list(
     )
     result = await run_contract_notes_list(body, ctx)
     if isinstance(result, ToolError):
+        tracing.emit_journey_api(
+            name="api.report.contract_notes.list",
+            finx_session_id=x_session_id,
+            client_code=x_user_id,
+            output={"ok": False, "error": result.code},
+        )
         return error_json_response(result)
+    notes = result.get("notes") if isinstance(result, dict) else None
+    tracing.emit_journey_api(
+        name="api.report.contract_notes.list",
+        finx_session_id=x_session_id,
+        client_code=x_user_id,
+        output={"ok": True, "note_count": len(notes) if isinstance(notes, list) else 0},
+    )
     return result
 
 
@@ -484,6 +498,12 @@ async def contract_notes_download(
     )
     result = await run_contract_notes_download(body, ctx)
     if isinstance(result, ToolError):
+        tracing.emit_journey_api(
+            name="api.report.contract_notes.download",
+            finx_session_id=x_session_id,
+            client_code=x_user_id,
+            output={"ok": False, "error": result.code},
+        )
         return error_json_response(result)
     # Widget completion → agent memory (CHO-214): fire-and-forget. The note's
     # identity travels as its (whitelisted, UI-visible) file name.
@@ -496,5 +516,11 @@ async def contract_notes_download(
         details=[file_name] if file_name else [],
         slots={"file": file_name},
         delivery="download",
+    )
+    tracing.emit_journey_api(
+        name="api.report.contract_notes.download",
+        finx_session_id=x_session_id,
+        client_code=x_user_id,
+        output={"ok": True},
     )
     return result

@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useState } from 'react'
 
+import { authHeaders } from './chat/agent'
+import { hasCredentials, type SessionContext } from './session'
+
 /**
  * "What's new" announcements (whats-new capability, frontend half).
  *
- * Pinned backend contract (no credentials required — broadcast content):
+ * Pinned backend contract (content is broadcast — credentials optional):
  *   GET /api/whats-new
  *   200 -> {"version": "<id>", "items": [{"emoji", "tint", "title", "description"}, ...]}
+ *
+ * When a session exists, CHO-288 forwards the auth triple so Langfuse can
+ * join the observation to the FinX journey. The endpoint still works without
+ * headers.
  *
  * The red dot on the header pill shows only while the fetched version
  * differs from the locally persisted seen version. Dismissing the modal
@@ -66,7 +73,7 @@ function parseContent(body: unknown): WhatsNewContent | null {
   return parsed.length > 0 ? { version, items: parsed } : null
 }
 
-export function useWhatsNew(): {
+export function useWhatsNew(session?: SessionContext | null): {
   /** Announcement items, or null while loading / when unavailable. */
   items: WhatsNewItem[] | null
   /** True when the current content version has not been dismissed on this device. */
@@ -76,11 +83,19 @@ export function useWhatsNew(): {
 } {
   const [content, setContent] = useState<WhatsNewContent | null>(null)
   const [seenVersion, setSeenVersion] = useState<string | null>(readSeenVersion)
+  // Credential identity for the effect dep — avoid refetching on SessionContext
+  // object identity alone.
+  const sessionKey =
+    session && hasCredentials(session)
+      ? `${session.userId}\0${session.sessionId}\0${session.accessToken}`
+      : ''
 
   useEffect(() => {
     const controller = new AbortController()
+    const headers =
+      session && hasCredentials(session) ? authHeaders(session) : undefined
 
-    fetch('/api/whats-new', { signal: controller.signal })
+    fetch('/api/whats-new', { signal: controller.signal, headers })
       .then(async (res) => (res.ok ? parseContent(await res.json().catch(() => null)) : null))
       .then((parsed) => {
         if (parsed !== null && !controller.signal.aborted) setContent(parsed)
@@ -90,7 +105,7 @@ export function useWhatsNew(): {
       })
 
     return () => controller.abort()
-  }, [])
+  }, [session, sessionKey])
 
   const markSeen = useCallback(() => {
     if (content === null) return

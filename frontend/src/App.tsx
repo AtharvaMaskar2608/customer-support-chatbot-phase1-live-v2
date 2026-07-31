@@ -157,7 +157,7 @@ export default function App() {
   // CHO-229: used only by the parked Header — restore alongside it.
   // const userId = hasCredentials(session) ? session.userId : null
 
-  const whatsNew = useWhatsNew()
+  const whatsNew = useWhatsNew(session)
   const [whatsNewOpen, setWhatsNewOpen] = useState(false)
 
   // CHO-216 / CHO-273: conversation state drives the header pill. Main Menu

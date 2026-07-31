@@ -1,12 +1,12 @@
-"""Langfuse mirror for the agent span tree (CHO-286).
+"""Langfuse mirror for the agent span tree (CHO-286) + journey APIs (CHO-288).
 
-A SECOND sink for the exact tree `tracing.py` already assembles for
-``agent_traces``. Postgres stays the system of record; this is a mirror, and it
-is subordinate in every direction:
+A SECOND sink for the tree `tracing.py` assembles for ``agent_traces``, plus
+short-lived observations for non-chat journey HTTP APIs. Postgres stays the
+system of record for chat turns; the mirror is subordinate in every direction:
 
-* it never observes anything the Postgres path does not — every call here is
-  made from inside the five ``observe_*`` helpers, which are the only places a
-  span is opened or closed;
+* chat-turn spans still originate from the ``observe_*`` helpers;
+* journey API observations are explicit best-effort roots (CHO-288) and are
+  never required for request success;
 * it is OFF unless ``LANGFUSE_TRACING`` is on AND both credentials and a base
   URL are present, so an unconfigured environment constructs no client and
   makes no network call;
@@ -14,17 +14,15 @@ is subordinate in every direction:
   down, slow, or misconfigured must not change the chat response, must not
   delay it, and must not prevent the `agent_traces` write.
 
-Identity mapping (see the `trace-mirror` capability):
+Identity mapping (CHO-288 / `trace-mirror`):
 
-    Langfuse session_id  <-  conversation Thread.id   (same value as thread_id)
-    Langfuse user_id     <-  client_code              (raw; same value Postgres holds)
+    Langfuse session_id  <-  HMAC(FinX SessionId)   (never the raw credential)
+    Langfuse user_id     <-  client_code            (raw; same as Postgres)
+    metadata.thread_id   <-  conversation Thread.id
 
-Both are the values Postgres already stores, which is what keeps the two stores
-joinable — a Langfuse trace can be pivoted to its `agent_traces` row on either
-key. The client code rides raw: it is an internal account identifier, not
-personal data, so traces stay searchable by customer. The FinX SSO session id
-is NOT sent in any form — that one is a live credential (the report endpoints
-authenticate with it), which is a security constraint, not a privacy one.
+Chat turns join Postgres via metadata ``thread_id`` + ``user.id``. The FinX
+SSO session id is a live credential (report endpoints authenticate with it) and
+MUST NOT appear raw in any Langfuse field.
 
 Identity is applied AFTER the root span opens, directly onto the OTel span,
 rather than through ``propagate_attributes``. That is deliberate: the thread id
@@ -233,6 +231,42 @@ def create_feedback_score(
         logger.warning("langfuse score failed error=%s", type(exc).__name__)
 
 
+def emit_api_observation(
+    *,
+    name: str,
+    lf_session_id: str | None = None,
+    user_id: str | None = None,
+    thread_id: str | None = None,
+    metadata: dict | None = None,
+    output: Any = None,
+    input: Any = None,
+    version: str | None = None,
+) -> None:
+    """Short-lived Langfuse root for a journey HTTP API (CHO-288).
+
+    ``lf_session_id`` must already be the hashed FinX SessionId (callers use
+    ``tracing.stable_session_id``). Never pass the raw SessionId here.
+    """
+    if not enabled():
+        return
+    handle = None
+    try:
+        meta = {k: v for k, v in (metadata or {}).items() if v is not None}
+        if thread_id:
+            meta["thread_id"] = thread_id
+        handle = start_root(
+            name=name,
+            input=input,
+            metadata=meta or None,
+            version=version or meta.get("backend_version"),
+        )
+        set_identity(handle, user_id=user_id, session_id=lf_session_id)
+        end(handle, metadata=meta or None, output=output)
+    except Exception as exc:
+        logger.warning("langfuse api obs failed error=%s", type(exc).__name__)
+        end(handle)
+
+
 def emit_ticket_observation(
     *,
     session_id: str | None,
@@ -242,32 +276,33 @@ def emit_ticket_observation(
     platform: str | None = None,
     screen_name: str | None = None,
     backend_version: str | None = None,
+    thread_id: str | None = None,
 ) -> None:
-    """Short-lived root for help-card ``/api/ticket`` (no observe_turn there)."""
-    if not enabled() or ticket_id is None:
-        return
-    handle = None
-    try:
-        meta = {"ticket_id": ticket_id}
-        if reason:
-            meta["reason"] = reason
-        if platform:
-            meta["platform"] = platform
-        if screen_name:
-            meta["screen_name"] = screen_name
-        if backend_version:
-            meta["backend_version"] = backend_version
-        handle = start_root(
-            name="raise_ticket",
-            metadata=meta,
-            version=backend_version,
-        )
-        set_identity(handle, user_id=user_id, session_id=session_id)
-        end(handle, metadata=meta, output={"ticketId": ticket_id})
-    except Exception as exc:
-        logger.warning("langfuse ticket obs failed error=%s", type(exc).__name__)
-        end(handle)
+    """Help-card ``/api/ticket`` observation (wraps :func:`emit_api_observation`).
 
+    ``session_id`` is the Langfuse session id (hashed FinX SessionId), not the
+    raw credential and not Thread.id.
+    """
+    if ticket_id is None:
+        return
+    meta: dict[str, Any] = {"ticket_id": ticket_id}
+    if reason:
+        meta["reason"] = reason
+    if platform:
+        meta["platform"] = platform
+    if screen_name:
+        meta["screen_name"] = screen_name
+    if backend_version:
+        meta["backend_version"] = backend_version
+    emit_api_observation(
+        name="raise_ticket",
+        lf_session_id=session_id,
+        user_id=user_id,
+        thread_id=thread_id,
+        metadata=meta,
+        output={"ticketId": ticket_id},
+        version=backend_version,
+    )
 
 def shutdown() -> None:
     """Flush pending spans at app shutdown. Batched export means a short-lived

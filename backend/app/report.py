@@ -19,6 +19,7 @@ from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from app.agent import tracing
 from app.agent.ctx import (
     CODE_NO_DATA,
     CODE_UPSTREAM_ERROR,
@@ -212,6 +213,12 @@ async def pnl_report(
                 delivery=body.delivery,
                 outcome="no_data",
             )
+        tracing.emit_journey_api(
+            name="api.report.pnl",
+            finx_session_id=x_session_id,
+            client_code=x_user_id,
+            output={"ok": False, "error": result.code},
+        )
         return error_json_response(result)
     # Widget completion → agent memory (CHO-214): fire-and-forget, never
     # delays or fails this response.
@@ -228,6 +235,12 @@ async def pnl_report(
         },
         delivery=body.delivery,
     )
+    tracing.emit_journey_api(
+        name="api.report.pnl",
+        finx_session_id=x_session_id,
+        client_code=x_user_id,
+        output={"ok": True, "delivery": body.delivery},
+    )
     return result
 
 
@@ -242,9 +255,17 @@ async def report_file(file_token: str, request: Request):
     entry = request.app.state.report_files.get(file_token)
     if entry is None:
         # Unknown or expired — indistinguishable.
+        tracing.emit_journey_api(
+            name="api.report.file",
+            output={"ok": False, "error": "NOT_FOUND"},
+        )
         return JSONResponse(status_code=404, content={"error": "NOT_FOUND"})
 
     filename = _safe_header_filename(entry.filename)
+    tracing.emit_journey_api(
+        name="api.report.file",
+        output={"ok": True},
+    )
     return Response(
         content=entry.data,
         media_type=entry.content_type,

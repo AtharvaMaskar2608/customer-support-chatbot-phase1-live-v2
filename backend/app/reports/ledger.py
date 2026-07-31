@@ -19,6 +19,7 @@ from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from app.agent import tracing
 from app.agent.ctx import (
     CODE_NO_DATA,
     CODE_UPSTREAM_ERROR,
@@ -206,6 +207,12 @@ async def ledger_report(
                 delivery=body.delivery,
                 outcome="no_data",
             )
+        tracing.emit_journey_api(
+            name="api.report.ledger",
+            finx_session_id=x_session_id,
+            client_code=x_user_id,
+            output={"ok": False, "error": result.code},
+        )
         return error_json_response(result)
     # Widget completion → agent memory (CHO-214): fire-and-forget.
     record_flow_event(
@@ -220,5 +227,11 @@ async def ledger_report(
             "toDate": body.toDate,
         },
         delivery=body.delivery,
+    )
+    tracing.emit_journey_api(
+        name="api.report.ledger",
+        finx_session_id=x_session_id,
+        client_code=x_user_id,
+        output={"ok": True, "delivery": body.delivery},
     )
     return result

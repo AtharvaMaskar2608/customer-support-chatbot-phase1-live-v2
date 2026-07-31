@@ -103,9 +103,10 @@ def _stable_id(value: str | None) -> str | None:
     """HMAC hash of a sensitive identifier so turns can be grouped without
     storing the raw value. Pseudonymisation, not secrecy of the mapping.
 
-    No longer applied to `user_id` (CHO-286 stores the client code raw — it is
-    an account identifier, not personal data). Retained for the SSO session id,
-    which is a live credential and may only ever be correlated by hash.
+    No longer applied to `user_id` (CHO-287 stores the client code raw — it is
+    an account identifier, not personal data). Used for the FinX SSO session id
+    (CHO-288 Langfuse ``session.id``): that value is a live credential and may
+    only ever be correlated by hash.
     """
     if not value:
         return None
@@ -114,9 +115,13 @@ def _stable_id(value: str | None) -> str | None:
 
 
 def stable_user_id(client_code: str | None) -> str | None:
-    """Public alias of :func:`_stable_id` for callers outside this module."""
+    """Public alias of :func:`_stable_id` (legacy; user ids are raw since CHO-287)."""
     return _stable_id(client_code)
 
+
+def stable_session_id(finx_session_id: str | None) -> str | None:
+    """Salted HMAC of the FinX SessionId for Langfuse ``session.id`` (CHO-288)."""
+    return _stable_id(finx_session_id)
 
 # --------------------------------------------------------------------------- #
 # Span model + per-turn collector (held in contextvars for nesting).
@@ -153,6 +158,8 @@ class _Trace:
     # CHO-286 context fields (platform / entry point / versions / ticket / seq).
     # Merged onto the root span metadata at end so both sinks see the same bag.
     context: dict = field(default_factory=dict)
+    # CHO-288: hashed FinX SessionId for Langfuse session.id (never raw).
+    lf_session_id: str | None = None
     _counter: int = 0
 
     def open(self, type_: str, name: str, parent_id: str | None) -> _Span:
@@ -400,23 +407,23 @@ async def lookup_lf_trace_id(
 def bind_conversation_thread(thread_id: str | None) -> None:
     """Point the in-flight trace at the conversation-store Thread.id (CHO-275).
 
-    Main Menu / cold-load ``reset_thread`` mints a new store id; traces that
-    previously hashed ``session_id`` kept rolling up after reset. Call this
-    right after ``store.get_thread`` so cost buckets match conversation STM.
+    Postgres ``agent_traces.thread_id`` and Langfuse metadata ``thread_id`` use
+    this value. Langfuse ``session.id`` is the hashed FinX SessionId (CHO-288),
+    so Main Menu minting a new Thread keeps the Langfuse session and splits
+    conversations via metadata. Call right after ``store.get_thread``.
     No-op when tracing is off or no turn is active.
     """
     trace = _current_trace.get()
     if trace is None or not thread_id:
         return
     trace.thread_id = thread_id
-    # CHO-286: the mirror's identity lands here rather than at turn start,
-    # because this is the first moment the thread id exists. It still precedes
-    # every child span (loop.py binds at :275, the first model round is :392),
-    # so the whole tree carries it.
+    bind_turn_context(thread_id=thread_id)
+    # Identity lands here: thread id exists, and this still precedes every
+    # child span (loop.py binds before the first model round).
     root = trace.spans[0] if trace.spans else None
     if root is not None:
         langfuse_mirror.set_identity(
-            root.lf, user_id=trace.user_id, session_id=thread_id
+            root.lf, user_id=trace.user_id, session_id=trace.lf_session_id
         )
 
 
@@ -439,6 +446,28 @@ def bind_ticket_id(ticket_id: Any) -> None:
     if ticket_id is None:
         return
     bind_turn_context(ticket_id=ticket_id)
+
+
+def emit_journey_api(
+    *,
+    name: str,
+    finx_session_id: str | None = None,
+    client_code: str | None = None,
+    thread_id: str | None = None,
+    metadata: dict | None = None,
+    output: Any = None,
+    input: Any = None,
+) -> None:
+    """Best-effort Langfuse observation for a non-chat journey HTTP API (CHO-288)."""
+    langfuse_mirror.emit_api_observation(
+        name=name,
+        lf_session_id=stable_session_id(finx_session_id),
+        user_id=client_code,
+        thread_id=thread_id,
+        metadata=metadata,
+        output=output,
+        input=input,
+    )
 
 
 def bind_turn_seq(turn_seq: int | None) -> None:
@@ -469,18 +498,24 @@ async def observe_turn(
     platform: str | None = None,
     screen_name: str | None = None,
     frontend_version: str | None = None,
+    finx_session_id: str | None = None,
 ) -> AsyncIterator[str]:
-    """agent root span for one /api/chat turn. ``user_id`` is a hashed client
-    code; ``thread_id`` starts unset and is filled by
-    :func:`bind_conversation_thread` once the store thread is known (CHO-275).
-    Persists the assembled tree at turn end."""
+    """agent root span for one /api/chat turn.
+
+    ``user_id`` is the raw client code (CHO-287). ``thread_id`` starts unset and
+    is filled by :func:`bind_conversation_thread` once the store thread is known
+    (CHO-275). Langfuse ``session.id`` is the HMAC of the FinX SessionId
+    (CHO-288); pass ``finx_session_id`` (live FinX id — not a playground
+    namespaced store key). Persists the assembled tree at turn end.
+    """
     if not _ENABLED or pool is None:
         async for chunk in run():
             yield chunk
         return
-    # session_id kept on the signature for callers / future fallbacks; thread
-    # grouping uses the conversation Thread.id via bind_conversation_thread.
+    # ``session_id`` is the store key (may be playground-namespaced). Langfuse
+    # session hashing uses the live FinX SessionId only.
     _ = session_id
+    lf_session = stable_session_id(finx_session_id or session_id)
     context = {
         k: v
         for k, v in {
@@ -493,15 +528,14 @@ async def observe_turn(
     }
     trace = _Trace(
         thread_id=None,
-        # CHO-286: the client code is stored RAW. It is an internal account
-        # identifier, not personal data, and hashing it only cost the ability to
-        # look a customer up in a trace. The SSO session id is a different
-        # matter and is still never stored — that is a credential (the report
-        # endpoints authenticate with it), not a privacy question.
+        # CHO-287: the client code is stored RAW. It is an internal account
+        # identifier, not personal data. The FinX SSO session id is hashed for
+        # Langfuse session.id (CHO-288) and never stored raw — credential.
         user_id=client_code,
         input=redact(message),
         start_ms=_now_ms(),
         context=context,
+        lf_session_id=lf_session,
     )
     root = trace.open("agent", "chat_turn", parent_id=None)
     t_tok = _current_trace.set(trace)

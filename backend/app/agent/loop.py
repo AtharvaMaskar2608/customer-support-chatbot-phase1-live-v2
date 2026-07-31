@@ -232,6 +232,9 @@ async def run_chat_stream(
             platform=ctx.platform,
             screen_name=ctx.screen_name,
             frontend_version=ctx.frontend_version,
+            # Live FinX SessionId for Langfuse session hashing (CHO-288) —
+            # never the playground-namespaced store key.
+            finx_session_id=ctx.session_id,
             run=lambda: _chat_events(
                 message=message,
                 ctx=ctx,
