@@ -218,13 +218,14 @@ def test_llm_round_is_a_generation_with_native_usage(mirror):
 
 
 def test_identity_matches_what_postgres_stores(mirror):
-    """The join key: session = Thread.id, user = the same HMAC in the row."""
+    """The join key: session = Thread.id, user = the client code — both the
+    identical values the Postgres row stores."""
     pool = FakePool()
     _drive_turn(pool)
 
     attrs = _by_name(mirror)["chat_turn"]._otel_span.attributes
     assert attrs["session.id"] == THREAD
-    assert attrs["user.id"] == tracing._stable_id(CLIENT_CODE)
+    assert attrs["user.id"] == CLIENT_CODE  # raw: an account id, not PII
 
     insert = [c for c in pool.calls if "INSERT INTO agent_traces" in c[0]][0]
     stored_thread, stored_user = insert[1][0], insert[1][1]
@@ -246,8 +247,9 @@ def test_main_menu_reset_starts_a_new_session(mirror):
 
 
 def test_sso_session_token_never_reaches_the_mirror(mirror):
-    """The FinX SessionId authenticates the report endpoints. It must not appear
-    anywhere in the exported payload — not as the session id, not in a field."""
+    """The FinX SessionId authenticates the report endpoints, so it must not
+    appear anywhere in the exported payload. The client code is a different
+    case — an account identifier, carried deliberately as user_id."""
     _drive_turn(FakePool())
     blob = repr(
         [
@@ -256,9 +258,8 @@ def test_sso_session_token_never_reaches_the_mirror(mirror):
         ]
     )
     assert SSO_SESSION not in blob
-    assert CLIENT_CODE not in blob
-    # And the hashed user id is what is there instead.
-    assert tracing._stable_id(CLIENT_CODE) in blob
+    # The client code IS present, as the user id — that is the point of it.
+    assert CLIENT_CODE in blob
 
 
 # --- the mask ----------------------------------------------------------------

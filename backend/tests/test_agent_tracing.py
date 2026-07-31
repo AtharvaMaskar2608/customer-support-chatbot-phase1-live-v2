@@ -225,9 +225,12 @@ def test_full_turn_builds_tree_and_persists():
          had_error, tin, tout, spans_json) = args
 
         assert thread_id == "conv-uuid-1"  # conversation Thread.id (CHO-275)
-        assert user_id == tracing._stable_id("X008593")  # hashed client code
+        # CHO-287: the client code is an account identifier, not personal data,
+        # so it is stored verbatim and a trace is findable by customer.
+        assert user_id == "X008593"
+        # The SSO session id is still never stored — that one is a credential.
         assert "sess-123" != thread_id
-        assert "X008593" != user_id
+        assert "sess-123" not in str(args)
         assert model == "claude-haiku-4-5"
         assert in_tok == 120 and out_tok == 18
         assert tools == ["search_knowledge_base"]
