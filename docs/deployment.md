@@ -32,11 +32,19 @@ Version scheme: bump the component's tag by one and mirror the new tag in
 
 ```bash
 docker build -t 829433345651.dkr.ecr.ap-south-1.amazonaws.com/customer-support-chatbot:backendv1.0.3  backend/
-docker build -t 829433345651.dkr.ecr.ap-south-1.amazonaws.com/customer-support-chatbot:frontendv1.0.3 frontend/
+docker build --build-arg VITE_APP_VERSION=frontendv1.0.3 \
+  -t 829433345651.dkr.ecr.ap-south-1.amazonaws.com/customer-support-chatbot:frontendv1.0.3 frontend/
 ```
 
 The frontend build runs `tsc` + both Vite entries inside the image — a type
 error fails the build, which is intended.
+
+**The frontend tag is typed twice on purpose** — `--build-arg VITE_APP_VERSION`
+must equal the `-t` tag. Vite bakes it into the bundle at build time (a static
+nginx image has no runtime env), and it becomes `frontend_version` on every
+trace. Get them out of step and traces name a build that isn't what's serving.
+The backend equivalent is `BOT_VERSION` in `docker-compose.yml`, which must
+likewise equal the backend image tag.
 
 ## 2. Smoke-test locally (optional but recommended)
 
@@ -77,7 +85,13 @@ FRESHDESK_API_KEY=...     # ticket escalation
 ```
 
 FinX credentials are NOT in the env — they arrive per-request from the widget
-(userId / sessionId / accessToken headers).
+(userId / sessionId / accessToken headers). So do **not** copy a dev `.env` to
+the server wholesale: `FINX_SSO_JWT` / `FINX_SESSION` / `FINX_TEST_CLIENT_ID`
+are local testing values (the JWT expires in 8h and is useless there),
+`DATABASE_URL` points at a local tunnel that does not resolve from the server,
+and `TRACES_ADMIN_TOKEN` should be a *different* secret in prod — it unlocks a
+dashboard showing real client codes and conversation text. Add the keys the
+server needs to the server's own `.env` instead of replacing it.
 
 ```bash
 aws ecr get-login-password --region ap-south-1 \
@@ -98,6 +112,7 @@ docker load < jini-frontend-v1.0.2.tar.gz
 docker network create jini-net
 docker run -d --name jini-backend  --network jini-net --network-alias backend \
   --env-file /home/harsh/jini/.env --restart unless-stopped -p 8000:8000 \
+  -e BOT_VERSION=backendv1.0.3 \
   829433345651.dkr.ecr.ap-south-1.amazonaws.com/customer-support-chatbot:backendv1.0.3
 docker run -d --name jini-frontend --network jini-net --restart unless-stopped -p 8080:80 \
   829433345651.dkr.ecr.ap-south-1.amazonaws.com/customer-support-chatbot:frontendv1.0.3
@@ -152,7 +167,11 @@ arrow posts an origin-checked close message to the host page.
 
 1. Merge to main.
 2. Bump the tag (`backendv1.0.3` → `backendv1.0.5` etc.) in the build command
-   AND in `docker-compose.yml`; commit the compose bump.
+   AND in `docker-compose.yml`; commit the compose bump. The tag appears in
+   **three** places per release — miss one and the version stamped on traces
+   stops matching the code that produced them:
+   - backend: the `-t` tag **and** `BOT_VERSION` in `docker-compose.yml`
+   - frontend: the `-t` tag **and** `--build-arg VITE_APP_VERSION`
 3. Build → push → on the server: `docker compose pull && docker compose up -d`.
 
 ## Troubleshooting
