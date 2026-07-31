@@ -37,11 +37,18 @@ export type ReportResult =
 
 /** Same credential triple as the greeting fetch. Raw JWT — no "Bearer". */
 function authHeaders(session: SessionContext): Record<string, string> {
-  return {
+  const headers: Record<string, string> = {
     Authorization: session.accessToken!,
     'X-Session-Id': session.sessionId!,
     'X-User-Id': session.userId!,
   }
+  if (session.platform) headers['X-Platform'] = session.platform
+  if (session.screenName) headers['X-Screen-Name'] = session.screenName
+  const frontendVersion = import.meta.env.VITE_APP_VERSION
+  if (typeof frontendVersion === 'string' && frontendVersion.trim() !== '') {
+    headers['X-Frontend-Version'] = frontendVersion.trim()
+  }
+  return headers
 }
 
 function statusToError(status: number): ReportErrorCode {

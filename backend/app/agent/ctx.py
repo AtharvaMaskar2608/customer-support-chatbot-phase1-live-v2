@@ -62,6 +62,11 @@ class ToolCtx:
     # transcript from it). The agent loop and /api/ticket set it; plain flow
     # routes leave it None.
     thread: Any | None = None
+    # Client context for tracing (CHO-286) — optional handoff headers, never
+    # credentials. Absent on flow routes that don't receive them.
+    platform: str | None = None
+    screen_name: str | None = None
+    frontend_version: str | None = None
 
 
 # --- tool-facing error codes -------------------------------------------------

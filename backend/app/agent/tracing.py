@@ -113,6 +113,11 @@ def _stable_id(value: str | None) -> str | None:
     return hmac.new(key, value.encode(), hashlib.sha256).hexdigest()[:16]
 
 
+def stable_user_id(client_code: str | None) -> str | None:
+    """Public alias of :func:`_stable_id` for callers outside this module."""
+    return _stable_id(client_code)
+
+
 # --------------------------------------------------------------------------- #
 # Span model + per-turn collector (held in contextvars for nesting).
 # --------------------------------------------------------------------------- #
@@ -145,6 +150,9 @@ class _Trace:
     input: Any
     start_ms: float
     spans: list[_Span] = field(default_factory=list)
+    # CHO-286 context fields (platform / entry point / versions / ticket / seq).
+    # Merged onto the root span metadata at end so both sinks see the same bag.
+    context: dict = field(default_factory=dict)
     _counter: int = 0
 
     def open(self, type_: str, name: str, parent_id: str | None) -> _Span:
@@ -162,7 +170,13 @@ class _Trace:
         # `llm` becomes a Langfuse `generation` so model/usage land in native
         # fields; everything else is a plain span.
         if parent_id is None:
-            span.lf = langfuse_mirror.start_root(name=name, input=self.input)
+            meta = {k: v for k, v in self.context.items() if v is not None}
+            span.lf = langfuse_mirror.start_root(
+                name=name,
+                input=self.input,
+                metadata=meta or None,
+                version=meta.get("backend_version"),
+            )
         else:
             parent = next((s for s in self.spans if s.id == parent_id), None)
             span.lf = langfuse_mirror.start_child(
@@ -338,6 +352,46 @@ def _schedule_persist(pool: Any, trace: _Trace) -> None:
         pass
 
 
+async def lookup_lf_trace_id(
+    pool: Any, *, thread_id: str | None, turn_seq: int | None
+) -> str | None:
+    """Find ``lf_trace_id`` on a persisted root whose ``turn_seq`` matches.
+
+    Used by ``/api/feedback`` to score the Langfuse turn the user rated.
+    Best-effort: missing pool/ids or a miss returns None (caller falls back to
+    session-level scoring).
+    """
+    if pool is None or not thread_id or turn_seq is None:
+        return None
+    try:
+        rows = await pool.fetch(
+            "SELECT spans FROM agent_traces WHERE thread_id = $1 "
+            "ORDER BY created_at DESC LIMIT 30",
+            thread_id,
+        )
+    except Exception as exc:
+        logger.warning("lf_trace lookup failed error=%s", type(exc).__name__)
+        return None
+    for row in rows or []:
+        spans = row["spans"] if isinstance(row, dict) else row[0]
+        if isinstance(spans, str):
+            try:
+                spans = json.loads(spans)
+            except Exception:
+                continue
+        if not isinstance(spans, list) or not spans:
+            continue
+        root = spans[0]
+        if not isinstance(root, dict):
+            continue
+        meta = root.get("metadata") or {}
+        if meta.get("turn_seq") == turn_seq:
+            lf_id = meta.get("lf_trace_id")
+            if isinstance(lf_id, str) and lf_id:
+                return lf_id
+    return None
+
+
 # --------------------------------------------------------------------------- #
 # Public wrappers — pass-through when off / no pool / no active trace.
 # --------------------------------------------------------------------------- #
@@ -366,9 +420,55 @@ def bind_conversation_thread(thread_id: str | None) -> None:
         )
 
 
+def bind_turn_context(**fields: Any) -> None:
+    """Merge non-None context fields onto the in-flight trace (and open root)."""
+    trace = _current_trace.get()
+    if trace is None:
+        return
+    updates = {k: v for k, v in fields.items() if v is not None}
+    if not updates:
+        return
+    trace.context.update(updates)
+    root = trace.spans[0] if trace.spans else None
+    if root is not None:
+        langfuse_mirror.set_metadata(root.lf, updates)
+
+
+def bind_ticket_id(ticket_id: Any) -> None:
+    """Stamp a raised Freshdesk ticket id onto the open turn root."""
+    if ticket_id is None:
+        return
+    bind_turn_context(ticket_id=ticket_id)
+
+
+def bind_turn_seq(turn_seq: int | None) -> None:
+    """Stamp the exchange's last stored seq (feedback anchor) onto the root."""
+    if turn_seq is None:
+        return
+    bind_turn_context(turn_seq=turn_seq)
+
+
+def _root_context_for_end(trace: _Trace, root: _Span) -> dict:
+    """Final root metadata bag shared by Postgres spans and the Langfuse end."""
+    meta = {k: v for k, v in trace.context.items() if v is not None}
+    if root.end_ms is not None:
+        meta["latency_ms"] = int(root.end_ms - root.start_ms)
+    lf_id = langfuse_mirror.trace_id(root.lf)
+    if lf_id:
+        meta["lf_trace_id"] = lf_id
+    return meta
+
+
 async def observe_turn(
-    *, message: str, session_id: str, client_code: str, pool: Any,
+    *,
+    message: str,
+    session_id: str,
+    client_code: str,
+    pool: Any,
     run: Callable[[], AsyncIterator[str]],
+    platform: str | None = None,
+    screen_name: str | None = None,
+    frontend_version: str | None = None,
 ) -> AsyncIterator[str]:
     """agent root span for one /api/chat turn. ``user_id`` is a hashed client
     code; ``thread_id`` starts unset and is filled by
@@ -381,6 +481,16 @@ async def observe_turn(
     # session_id kept on the signature for callers / future fallbacks; thread
     # grouping uses the conversation Thread.id via bind_conversation_thread.
     _ = session_id
+    context = {
+        k: v
+        for k, v in {
+            "platform": platform,
+            "screen_name": screen_name,
+            "frontend_version": frontend_version,
+            "backend_version": config.bot_version(),
+        }.items()
+        if v is not None
+    }
     trace = _Trace(
         thread_id=None,
         # CHO-286: the client code is stored RAW. It is an internal account
@@ -391,6 +501,7 @@ async def observe_turn(
         user_id=client_code,
         input=redact(message),
         start_ms=_now_ms(),
+        context=context,
     )
     root = trace.open("agent", "chat_turn", parent_id=None)
     t_tok = _current_trace.set(trace)
@@ -400,9 +511,14 @@ async def observe_turn(
             yield chunk
     finally:
         root.end_ms = _now_ms()
+        root.metadata = _root_context_for_end(trace, root)
         _current_parent.reset(p_tok)
         _current_trace.reset(t_tok)
-        langfuse_mirror.end(root.lf)
+        langfuse_mirror.end(
+            root.lf,
+            metadata=root.metadata or None,
+            version=root.metadata.get("backend_version"),
+        )
         _schedule_persist(pool, trace)
 
 

@@ -16,6 +16,9 @@ services:
   backend:
     image: 829433345651.dkr.ecr.ap-south-1.amazonaws.com/customer-support-chatbot:backendv1.0.11
     env_file: .env                 # secrets: DATABASE_URL, ANTHROPIC_API_KEY, OPENAI_API_KEY, FRESHDESK_*, ...
+    environment:
+      # CHO-286: stamp the image tag onto each turn root (override via .env if needed).
+      BOT_VERSION: backendv1.0.11
     ports:
       - "8000:8000"
     restart: unless-stopped
