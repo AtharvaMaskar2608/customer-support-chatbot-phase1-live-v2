@@ -1,0 +1,201 @@
+# Langfuse trace mirror — production stack for the Jini server (CHO-286).
+#
+# Runs ALONGSIDE the two Jini containers, not with them: this is a separate
+# compose project in /home/harsh/langfuse/, while jini-backend/jini-frontend
+# keep running from /home/harsh/jini/ exactly as §4 of docs/deployment.md
+# describes. Nothing here touches them.
+#
+# Derived from the upstream Langfuse v3 compose (github.com/langfuse/langfuse).
+# Every deviation is deliberate and listed here — when upgrading, re-trim the
+# new upstream file rather than editing this one blind:
+#
+#   1. HOST PORTS REMOVED except langfuse-web, which binds to 127.0.0.1 only.
+#      Upstream publishes web on 0.0.0.0 and postgres/redis/clickhouse on
+#      loopback. On this box that would put the trace UI on the public
+#      interface, and since CHO-287 the traces carry RAW CLIENT CODES plus
+#      full conversation text. Reach the UI over an SSH tunnel (see docs §8).
+#      Dropping the postgres mapping also sidesteps a collision with anything
+#      already bound to 5432 on the host.
+#   2. SECRETS ARE REQUIRED, NOT DEFAULTED. Upstream ships `mysalt`,
+#      `miniosecret`, `clickhouse` etc. as working defaults, so a stack with a
+#      missing .env starts happily with known credentials. Here every secret is
+#      `${VAR:?...}` — compose refuses to start rather than boot insecure.
+#   3. langfuse-web JOINS `jini-net` so jini-backend can resolve it by name.
+#      That is the whole point of the exercise: LANGFUSE_BASE_URL on the
+#      backend is http://langfuse-web:3000. The other services stay on this
+#      project's private default network, unreachable from the Jini side.
+#   4. TELEMETRY_ENABLED=false — no usage pings out of the corporate network.
+#   5. AUTH_DISABLE_SIGNUP=true — the bootstrap user is created by the
+#      LANGFUSE_INIT_* vars on first boot; after that the UI accepts no new
+#      self-service signups.
+#   6. restart: unless-stopped (upstream: always) to match jini-backend and
+#      jini-frontend — a deliberate `docker stop` should survive a reboot.
+#
+# Bring up:  docker compose --env-file .env up -d
+# Tear down: docker compose down          (add -v to also drop trace history)
+
+services:
+  langfuse-worker:
+    image: docker.io/langfuse/langfuse-worker:3
+    restart: unless-stopped
+    depends_on: &langfuse-depends-on
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    environment: &langfuse-worker-env
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/postgres
+      SALT: ${SALT:?set SALT in .env — openssl rand -base64 32}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env — openssl rand -hex 32}
+      TELEMETRY_ENABLED: "false"
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD in .env}
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      LANGFUSE_USE_AZURE_BLOB: "false"
+      LANGFUSE_USE_OCI_NATIVE_OBJECT_STORAGE: "false"
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: minio
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+      # Browser-facing (presigned URLs resolve in YOUR browser, not in the
+      # container). Only used by media attachments, which our span tree has
+      # none of — left at the upstream default so nothing breaks if that
+      # changes; needs a tunnel on 9090 to actually work.
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: ${LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT:-http://localhost:9090}
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+      LANGFUSE_S3_BATCH_EXPORT_ENABLED: "false"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_AUTH: ${REDIS_AUTH:?set REDIS_AUTH in .env}
+      REDIS_TLS_ENABLED: "false"
+
+  langfuse-web:
+    image: docker.io/langfuse/langfuse:3
+    restart: unless-stopped
+    depends_on: *langfuse-depends-on
+    ports:
+      # Loopback ONLY — see deviation (1). Traces carry raw client codes.
+      - 127.0.0.1:3000:3000
+    networks:
+      # `default` keeps it talking to postgres/redis/clickhouse/minio here;
+      # `jini-net` is what lets jini-backend resolve `langfuse-web`.
+      - default
+      - jini-net
+    environment:
+      <<: *langfuse-worker-env
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?set NEXTAUTH_SECRET in .env — openssl rand -base64 32}
+      AUTH_DISABLE_SIGNUP: "true"
+      # First-boot bootstrap: creates the org, project, login user AND the
+      # pk-lf/sk-lf pair the backend authenticates with, so no click-through in
+      # the UI is needed to get keys. Ignored on every subsequent boot.
+      LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-choice}
+      LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME:-Choice}
+      LANGFUSE_INIT_PROJECT_ID: ${LANGFUSE_INIT_PROJECT_ID:-jini}
+      LANGFUSE_INIT_PROJECT_NAME: ${LANGFUSE_INIT_PROJECT_NAME:-Choice Jini}
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_INIT_PROJECT_PUBLIC_KEY:?set LANGFUSE_INIT_PROJECT_PUBLIC_KEY in .env}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_INIT_PROJECT_SECRET_KEY:?set LANGFUSE_INIT_PROJECT_SECRET_KEY in .env}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:?set LANGFUSE_INIT_USER_EMAIL in .env}
+      LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:-Jini Admin}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:?set LANGFUSE_INIT_USER_PASSWORD in .env}
+
+  clickhouse:
+    image: docker.io/clickhouse/clickhouse-server:25.12
+    restart: unless-stopped
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD in .env}
+    volumes:
+      - langfuse_clickhouse_data:/var/lib/clickhouse
+      - langfuse_clickhouse_logs:/var/log/clickhouse-server
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 1s
+
+  minio:
+    image: cgr.dev/chainguard/minio
+    restart: unless-stopped
+    entrypoint: sh
+    # create the 'langfuse' bucket before starting the service
+    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+    volumes:
+      - langfuse_minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 1s
+      timeout: 5s
+      retries: 5
+      start_period: 1s
+
+  redis:
+    image: docker.io/redis:7
+    restart: unless-stopped
+    command: >
+      --requirepass ${REDIS_AUTH:?set REDIS_AUTH in .env}
+      --maxmemory-policy noeviction
+    volumes:
+      - langfuse_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 10
+
+  postgres:
+    image: docker.io/postgres:17
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: postgres
+      TZ: UTC
+      PGTZ: UTC
+    volumes:
+      - langfuse_postgres_data:/var/lib/postgresql/data
+
+networks:
+  jini-net:
+    # Created by §4 of docs/deployment.md (`docker network create jini-net`).
+    # `external` means compose attaches to it and never manages it — bringing
+    # this stack down cannot take the Jini network with it.
+    external: true
+
+volumes:
+  langfuse_postgres_data:
+    driver: local
+  langfuse_clickhouse_data:
+    driver: local
+  langfuse_clickhouse_logs:
+    driver: local
+  langfuse_minio_data:
+    driver: local
+  langfuse_redis_data:
+    driver: local
