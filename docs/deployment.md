@@ -82,6 +82,7 @@ OPENAI_API_KEY=...        # KB query embeddings
 FRESHDESK_DOMAIN=...      # or FRESHDESK_API_ROOT
 FRESHDESK_API_KEY=...     # ticket escalation
 # optional: AGENT_MODEL / AGENT_THINKING / cap overrides / FRESHDESK_GROUP_ID
+# optional: LANGFUSE_* — the trace mirror, off unless set. See §8.
 ```
 
 FinX credentials are NOT in the env — they arrive per-request from the widget
@@ -174,11 +175,139 @@ arrow posts an origin-checked close message to the host page.
    - frontend: the `-t` tag **and** `--build-arg VITE_APP_VERSION`
 3. Build → push → on the server: `docker compose pull && docker compose up -d`.
 
+## 8. Langfuse trace mirror (optional — CHO-286/287/288)
+
+Postgres `agent_traces` is the system of record. Langfuse is a **second sink**
+for the same span tree, bought purely for its UI. The backend has shipped the
+mirror code since `backendv1.0.12`, but it is **off unless configured** — with
+no `LANGFUSE_*` env it logs one line and no-ops, and chat is unaffected. That
+is deliberate: a Langfuse outage must never touch a conversation.
+
+The stack is six containers (web, worker, Postgres, ClickHouse, Redis, MinIO)
+on a box that otherwise runs two. It is a separate compose project in
+`/home/harsh/langfuse/`; `jini-backend` and `jini-frontend` keep running from
+`/home/harsh/jini/` untouched. Artifacts live in **`deploy/langfuse/`** —
+a prod-trimmed compose file, an `.env.example`, and `gen-secrets.sh`. The
+header of that compose file lists every deviation from upstream and why.
+
+**Step 0 — two prerequisites the box may not meet.** Both are cheap to check
+and both change the plan, so answer them before touching anything else.
+
+```bash
+docker compose version              # on 10.132.147.130
+docker pull langfuse/langfuse:3
+```
+
+*No compose.* As of the 2026-07-19 deploy the server had **no compose plugin**
+— the apt mirror is blocked by the corporate proxy, which is why §4 runs the
+two Jini containers with plain `docker run`. Six interdependent containers with
+healthcheck ordering is not something to hand-translate into `docker run`, so
+install the plugin instead: it is a single static binary and needs no apt.
+
+```bash
+# from a machine with internet, then scp to the server:
+curl -fsSLO https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64
+scp docker-compose-linux-x86_64 harsh@10.132.147.130:/tmp/
+# on the server:
+mkdir -p ~/.docker/cli-plugins
+install -m 755 /tmp/docker-compose-linux-x86_64 ~/.docker/cli-plugins/docker-compose
+docker compose version
+```
+
+*No registry access.* ECR is IAM-blocked; Docker Hub may be too. If the pull
+fails, every one of the six images joins the tarball path (`docker save | gzip`,
+scp, `docker load`) — roughly 2–3 GB hand-carried on install and on every
+upgrade. Weigh that recurring cost against the benefit before committing.
+
+**Step 1 — stand up the stack.**
+
+```bash
+scp -r deploy/langfuse harsh@10.132.147.130:/home/harsh/langfuse
+# then on the server, in /home/harsh/langfuse:
+bash gen-secrets.sh > .env     # random values for every secret
+vi .env                        # fill LANGFUSE_INIT_USER_EMAIL (the only blank)
+docker compose up -d
+docker compose ps              # six services, postgres/redis/clickhouse/minio healthy
+```
+
+`gen-secrets.sh` exists because upstream's compose ships working defaults
+(`mysalt`, `miniosecret`) that are published in a public repo — a stack with a
+missing `.env` would start happily with known credentials. Our compose declares
+every secret `${VAR:?...}`, so it refuses to start instead.
+
+First boot also creates the org, project, admin login **and** the `pk-lf`/`sk-lf`
+pair from the `LANGFUSE_INIT_*` vars, so the keys exist before anyone opens the
+UI. Later boots ignore them.
+
+**Step 2 — point the backend at it.** Add to `/home/harsh/jini/.env` (the keys
+are the two `LANGFUSE_INIT_PROJECT_*_KEY` values from step 1):
+
+```
+LANGFUSE_TRACING=1
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_BASE_URL=http://langfuse-web:3000
+```
+
+**Container name, not `localhost:3000`** — inside `jini-backend`, localhost is
+the backend. `langfuse-web` resolves because the compose file attaches that one
+service to `jini-net`; the other five stay on Langfuse's private network.
+
+**Step 3 — recreate the backend.** Nothing to rebuild: `.env` is read at
+startup, and the image already carries the code.
+
+```bash
+docker rm -f jini-backend
+docker run -d --name jini-backend --network jini-net --network-alias backend \
+  --env-file /home/harsh/jini/.env --restart unless-stopped -p 8000:8000 \
+  -e BOT_VERSION=backendv1.0.12 \
+  829433345651.dkr.ecr.ap-south-1.amazonaws.com/customer-support-chatbot:backendv1.0.12
+```
+
+**Step 4 — verify.** One log line settles it:
+
+```bash
+docker logs jini-backend 2>&1 | grep -i "langfuse mirror"
+# langfuse mirror enabled (http://langfuse-web:3000)   → live
+# langfuse mirror disabled (LANGFUSE_TRACING off)      → flag not set
+# langfuse mirror disabled: credentials or base URL missing
+```
+
+Then run one real conversation and confirm the trace lands in the UI.
+
+**Reaching the UI.** The stack binds web to `127.0.0.1` only, so there is no
+public route to it — by design. Since CHO-287 the traces carry **raw client
+codes** alongside full conversation text, which is not something to put on the
+open internet behind a login form. Tunnel instead:
+
+```bash
+ssh -L 3000:127.0.0.1:3000 harsh@10.132.147.130   # then http://localhost:3000
+```
+
+Self-service signup is disabled; the bootstrap user is the only account until
+you invite others from inside the UI.
+
+**Rollback** is `LANGFUSE_TRACING=0` in the Jini `.env` and a backend recreate.
+Postgres tracing is untouched throughout, so nothing needs unwinding. The
+Langfuse stack itself can be left running or `docker compose down`-ed
+independently — `jini-net` is declared `external`, so bringing it down cannot
+take the Jini network with it.
+
+Per Langfuse's own docs this compose deployment has no HA, no scaling and no
+backups. Accepted deliberately: losing it loses a UI, not data. If Langfuse
+ever becomes where people actually look, that promotion is the moment to
+revisit the deployment.
+
 ## Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|
 | `403 Forbidden` on `docker push` | IAM user lacks ECR push rights — attach `AmazonEC2ContainerRegistryPowerUser` |
+| Chat fine, but no traces in Langfuse | Mirror is fail-open by design — grep the startup line (§8 step 4). Most often `LANGFUSE_TRACING` unset in the server `.env` |
+| `langfuse root failed error=ConnectError` in backend logs | `jini-backend` can't reach `langfuse-web` — check `LANGFUSE_BASE_URL` uses the container name and `docker network inspect jini-net` lists both |
+| Langfuse compose exits instantly with `required variable ... is missing` | Working as intended — a secret is blank in `/home/harsh/langfuse/.env`. Never paper over it with upstream's defaults |
+| Langfuse `postgres` won't start, port in use | Only if you re-added a host port mapping — the prod trim publishes none for it |
+| Traces attributed to the wrong build | `BOT_VERSION` not bumped on the `docker run` (§1) |
 | Chat text appears all at once | A proxy hop is buffering — `proxy_buffering off` on every nginx in the path |
 | `AGENT_UNAVAILABLE` on chat | `ANTHROPIC_API_KEY` missing/invalid in the server `.env` |
 | KB answers degrade / no memory | `DATABASE_URL` unreachable from the server (store logs dropped writes; chat keeps working by design) |
